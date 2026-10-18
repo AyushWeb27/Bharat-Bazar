@@ -28,14 +28,39 @@ export function AdminLoginPage({ setPage }: { setPage: (p: Page) => void }) {
   const [showPass, setShowPass] = useState(false);
   const [loading,  setLoading ] = useState(false);
   const [error,    setError   ] = useState("");
+  const [success,  setSuccess ] = useState("");
 
   const inp = "w-full bg-[#0c1628] border border-[#1e2d45] rounded-xl px-4 py-3.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all";
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!email || !password) { setError("Please enter your credentials to continue"); return; }
     setError("");
+    setSuccess("");
     setLoading(true);
-    setTimeout(() => { setLoading(false); setPage("admin"); }, 1300);
+
+    try {
+      const res = await fetch("/api/admin/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setError(data.message || "Authentication failed. Please check your credentials.");
+        setLoading(false);
+        return;
+      }
+
+      setSuccess("Authentication verified via Neon DB! Redirecting...");
+      setTimeout(() => {
+        setLoading(false);
+        setPage("admin");
+      }, 700);
+    } catch (err: any) {
+      setError(err?.message || "Network error. Failed to reach authentication server.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -216,6 +241,14 @@ export function AdminLoginPage({ setPage }: { setPage: (p: Page) => void }) {
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-red-500/25 bg-red-500/10">
                   <AlertCircle size={15} className="text-red-400 shrink-0" />
                   <p className="text-red-400 text-sm font-semibold">{error}</p>
+                </motion.div>
+              )}
+
+              {success && (
+                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-3 p-3.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10">
+                  <ShieldCheck size={15} className="text-emerald-400 shrink-0" />
+                  <p className="text-emerald-400 text-sm font-semibold">{success}</p>
                 </motion.div>
               )}
 

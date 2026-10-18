@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
@@ -64,6 +64,7 @@ import { AbandonedCartPage }       from "./admin/AbandonedCartPage";
 import { EmailTemplatePage }       from "./admin/EmailTemplatePage";
 import { ShippingPage }            from "./admin/ShippingPage";
 import { SellerKYCPage }           from "./admin/SellerKYCPage";
+import { AdminProfilePage }        from "./admin/AdminProfilePage";
 
 import type { Page } from "./types/index";
 import { G, fmt, orderStatusMeta, card } from "./admin/shared/constants";
@@ -133,8 +134,9 @@ const NAV_SELLERS = [
   { id: "seller-kyc",          icon: UserCheck,   label: "Seller KYC",         badge: "12", badgeRed: true },
 ];
 const NAV_SYSTEM = [
-  { id: "settings", icon: Settings,   label: "Settings" },
-  { id: "help",     icon: HelpCircle, label: "Help"     },
+  { id: "admin-profile", icon: UserCog,    label: "View & Edit Profile" },
+  { id: "settings",      icon: Settings,   label: "Settings" },
+  { id: "help",          icon: HelpCircle, label: "Help"     },
 ];
 
 // ── CHART TOOLTIPS ──────────────────────────────────────────────────────────────
@@ -581,12 +583,18 @@ function NavItemBtn({ item, active, collapsed, onClick }: {
   );
 }
 
-function SidebarInner({ activeNav, setActiveNav, collapsed, setCollapsed, closeMobile, setPage }: {
+function SidebarInner({ activeNav, setActiveNav, collapsed, setCollapsed, closeMobile, setPage, currentAdmin, onLogout }: {
   activeNav: string; setActiveNav: (id: string) => void;
   collapsed: boolean; setCollapsed: (v: boolean) => void;
   closeMobile: () => void; setPage: (p: Page) => void;
+  currentAdmin?: any;
+  onLogout: () => void;
 }) {
   const handleClick = (id: string) => { setActiveNav(id); closeMobile(); };
+  const adminName = currentAdmin?.name || "Super Admin";
+  const adminEmail = currentAdmin?.email || "admin@bharatbazar.com";
+  const initials = adminName.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() || "SA";
+
   return (
     <div className="h-full flex flex-col overflow-hidden" style={{ scrollbarWidth: "none" }}>
       {/* Logo */}
@@ -640,13 +648,13 @@ function SidebarInner({ activeNav, setActiveNav, collapsed, setCollapsed, closeM
       <div className={`shrink-0 border-t border-white/10 ${collapsed?"p-2 space-y-2":"p-3 space-y-2"}`}>
         {!collapsed ? (
           <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0" style={{background:G}}>SA</div>
-            <div className="flex-1 min-w-0"><p className="text-xs font-bold text-white truncate">Super Admin</p><p className="text-[10px] text-white/35 truncate">admin@bb.com</p></div>
-            <button onClick={() => setPage("admin-login")} className="text-white/25 hover:text-red-400 transition-colors shrink-0" title="Sign out"><LogOut size={14}/></button>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0" style={{background:G}}>{initials}</div>
+            <div className="flex-1 min-w-0"><p className="text-xs font-bold text-white truncate">{adminName}</p><p className="text-[10px] text-white/35 truncate">{adminEmail}</p></div>
+            <button onClick={onLogout} className="text-white/25 hover:text-red-400 transition-colors shrink-0" title="Sign out"><LogOut size={14}/></button>
           </div>
         ) : (
           <div className="relative group flex justify-center">
-            <button onClick={() => setPage("admin-login")} className="w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white" style={{background:G}}>SA</button>
+            <button onClick={onLogout} className="w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white" style={{background:G}}>{initials}</button>
             <div className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="bg-gray-900 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-xl">Sign Out</div>
             </div>
@@ -663,8 +671,9 @@ function SidebarInner({ activeNav, setActiveNav, collapsed, setCollapsed, closeM
 
 // ── MAIN EXPORT ────────────────────────────────────────────────────────────────
 
-export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
+export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) => void; currentAdmin?: any }) {
   const [activeNav,         setActiveNav        ] = useState("dashboard");
+  const [adminState,        setAdminState       ] = useState(currentAdmin);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarCollapsed,  setSidebarCollapsed ] = useState(false);
   const [notifOpen,         setNotifOpen        ] = useState(false);
@@ -682,6 +691,19 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
   ]);
   const unreadCount = notifItems.filter(n => !n.read).length;
 
+  useEffect(() => {
+    if (currentAdmin) setAdminState(currentAdmin);
+  }, [currentAdmin]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
+    setPage("admin-login");
+  };
+
   const handleRefresh = () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -693,7 +715,7 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
   const closeDropdowns = () => { setNotifOpen(false); setProfileOpen(false); };
 
   const sidebarW = sidebarCollapsed ? 64 : 240;
-  const sidebarProps = { activeNav, setActiveNav, collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed, closeMobile: () => setMobileSidebarOpen(false), setPage };
+  const sidebarProps = { activeNav, setActiveNav, collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed, closeMobile: () => setMobileSidebarOpen(false), setPage, currentAdmin: adminState, onLogout: handleLogout };
 
   function renderPage() {
     switch (activeNav) {
@@ -734,7 +756,7 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
       case "order-list":      return <OrderListPage />;
       case "returns":         return <ReturnPage />;
       case "ai-insights":     return <AIInsightReportPage />;
-      case "bulk-print":      return <BulkPrintOrdersPage />;
+      case "admin-profile":   return <AdminProfilePage currentAdmin={adminState} onProfileUpdated={(upd) => setAdminState((p: any) => ({ ...p, ...upd }))} />;
       case "admin-users":     return <UsersPage />;
       case "notifications":   return <NotificationPage />;
       case "faqs":            return <FAQPage />;
@@ -777,7 +799,7 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
         <header className="sticky top-0 z-[60] bg-white border-b border-gray-200 shadow-sm">
           {/* Click-away overlay for dropdowns */}
           {(notifOpen || profileOpen) && (
-            <div className="fixed inset-0 z-[59]" onClick={closeDropdowns}/>
+            <div className="fixed inset-0 z-[65]" onClick={closeDropdowns}/>
           )}
 
           <div className="flex items-center gap-2 px-4 py-3">
@@ -816,7 +838,7 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
             </button>
 
             {/* ── NOTIFICATIONS ── */}
-            <div className="relative shrink-0 z-50">
+            <div className="relative shrink-0 z-[70]">
               <button onClick={()=>{ setNotifOpen(v=>!v); setProfileOpen(false); }}
                 className="relative w-9 h-9 rounded-xl flex items-center justify-center border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-all">
                 <Bell size={16}/>
@@ -831,9 +853,11 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
               </button>
               <AnimatePresence>
                 {notifOpen && (
-                  <motion.div initial={{opacity:0,y:8,scale:0.95}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:6,scale:0.96}}
+                  <motion.div
+                    onClick={(e) => e.stopPropagation()}
+                    initial={{opacity:0,y:8,scale:0.95}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:6,scale:0.96}}
                     transition={{duration:0.15}}
-                    className="absolute right-0 top-12 w-80 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[70] overflow-hidden">
+                    className="absolute right-0 top-12 w-80 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[80] overflow-hidden">
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-100">
                       <div className="flex items-center gap-2">
@@ -873,8 +897,14 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
                     </div>
                     {/* Footer */}
                     <div className="border-t border-gray-100 px-4 py-2.5">
-                      <button onClick={()=>{ setActiveNav("notifications"); setNotifOpen(false); }}
-                        className="w-full text-xs font-bold text-center py-1.5 rounded-xl hover:bg-gray-50 transition-colors" style={{color:G}}>
+                      <button
+                        type="button"
+                        onClick={(e)=>{
+                          e.stopPropagation();
+                          setActiveNav("notifications");
+                          setNotifOpen(false);
+                        }}
+                        className="w-full text-xs font-bold text-center py-1.5 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer" style={{color:G}}>
                         View all notifications →
                       </button>
                     </div>
@@ -884,33 +914,45 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
             </div>
 
             {/* ── SUPER ADMIN PROFILE ── */}
-            <div className="relative shrink-0 z-50 pl-2 border-l border-gray-200">
-              <button onClick={()=>{ setProfileOpen(v=>!v); setNotifOpen(false); }}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-gray-50 transition-all">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0" style={{background:G}}>SA</div>
-                <div className="hidden md:block text-left">
-                  <p className="text-xs font-bold text-gray-900 whitespace-nowrap leading-tight">Super Admin</p>
-                  <p className="text-[10px] text-gray-400 whitespace-nowrap leading-tight">admin@bharatbazar.com</p>
+            <div className="relative shrink-0 z-[70] pl-2 border-l border-gray-200">
+              <button
+                type="button"
+                onClick={(e)=>{
+                  e.stopPropagation();
+                  setProfileOpen(v=>!v);
+                  setNotifOpen(false);
+                }}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-gray-50 transition-all cursor-pointer">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 pointer-events-none" style={{background:G}}>
+                  {(adminState?.name || "SA").split(" ").map((w: string)=>w[0]).join("").slice(0, 2).toUpperCase()}
                 </div>
-                <motion.span animate={{rotate: profileOpen ? 180 : 0}} transition={{duration:0.18}} className="hidden md:block">
+                <div className="hidden md:block text-left pointer-events-none">
+                  <p className="text-xs font-bold text-gray-900 whitespace-nowrap leading-tight">{adminState?.name || "Super Admin"}</p>
+                  <p className="text-[10px] text-gray-400 whitespace-nowrap leading-tight">{adminState?.email || "admin@bharatbazar.com"}</p>
+                </div>
+                <motion.span animate={{rotate: profileOpen ? 180 : 0}} transition={{duration:0.18}} className="hidden md:block pointer-events-none">
                   <ChevronDown size={12} className="text-gray-400"/>
                 </motion.span>
               </button>
 
               <AnimatePresence>
                 {profileOpen && (
-                  <motion.div initial={{opacity:0,y:8,scale:0.95}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:6,scale:0.96}}
+                  <motion.div
+                    onClick={(e) => e.stopPropagation()}
+                    initial={{opacity:0,y:8,scale:0.95}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:6,scale:0.96}}
                     transition={{duration:0.15}}
-                    className="absolute right-0 top-14 w-60 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[70] overflow-hidden">
+                    className="absolute right-0 top-14 w-60 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[80] overflow-hidden">
                     {/* Profile header */}
                     <div className="px-4 pt-4 pb-3 border-b border-gray-100" style={{background:`${G}08`}}>
                       <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black text-white shrink-0" style={{background:G}}>SA</div>
+                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black text-white shrink-0" style={{background:G}}>
+                          {(adminState?.name || "SA").split(" ").map((w: string)=>w[0]).join("").slice(0, 2).toUpperCase()}
+                        </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-black text-gray-900">Super Admin</p>
-                          <p className="text-[10px] text-gray-500 truncate">admin@bharatbazar.com</p>
+                          <p className="text-sm font-black text-gray-900">{adminState?.name || "Super Admin"}</p>
+                          <p className="text-[10px] text-gray-500 truncate">{adminState?.email || "admin@bharatbazar.com"}</p>
                           <span className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{background:`${G}20`,color:G}}>
-                            ● Full Access
+                            ● {adminState?.role || "superadmin"}
                           </span>
                         </div>
                       </div>
@@ -918,19 +960,26 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
                     {/* Menu items */}
                     <div className="py-1.5">
                       {[
-                        {icon:UserCog,    label:"My Profile",     sub:"View & edit profile",  action:()=>{}},
+                        {icon:UserCog,    label:"My Profile",     sub:"View & edit profile",  action:()=>{ setActiveNav("admin-profile"); setProfileOpen(false); }},
                         {icon:Settings,   label:"Settings",        sub:"System configuration", action:()=>{ setActiveNav("settings");    setProfileOpen(false); }},
                         {icon:Bell,       label:"Notifications",   sub:"Manage alerts",        action:()=>{ setActiveNav("notifications"); setProfileOpen(false); }},
                         {icon:HelpCircle, label:"Help & Support",  sub:"Docs and tickets",     action:()=>{ setActiveNav("help");         setProfileOpen(false); }},
                       ].map(item => {
                         const Icon = item.icon;
                         return (
-                          <button key={item.label} onClick={item.action}
-                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-left">
-                            <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              item.action();
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-left cursor-pointer">
+                            <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 pointer-events-none">
                               <Icon size={13} className="text-gray-500"/>
                             </div>
-                            <div className="flex-1 min-w-0">
+                            <div className="flex-1 min-w-0 pointer-events-none">
                               <p className="text-xs font-bold text-gray-800">{item.label}</p>
                               <p className="text-[9px] text-gray-400">{item.sub}</p>
                             </div>
@@ -939,10 +988,16 @@ export function AdminDashboard({ setPage }: { setPage: (p: Page) => void }) {
                       })}
                     </div>
                     <div className="border-t border-gray-100 p-2">
-                      <button onClick={()=>{ setPage("admin-login"); setProfileOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 transition-colors text-left">
-                        <LogOut size={13} className="text-red-500 shrink-0"/>
-                        <span className="text-xs font-bold text-red-500">Sign Out</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleLogout();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 transition-colors text-left cursor-pointer">
+                        <LogOut size={13} className="text-red-500 shrink-0 pointer-events-none"/>
+                        <span className="text-xs font-bold text-red-500 pointer-events-none">Sign Out</span>
                       </button>
                     </div>
                   </motion.div>
