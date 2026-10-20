@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "Admin successfully added to Neon database table.",
+      message: "Admin user added successfully.",
       admin: inserted[0],
     });
   } catch (error: any) {

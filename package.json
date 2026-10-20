@@ -8,9 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "db:setup": "node --env-file=.env scripts/setup-db.mjs",
+    "db:group-categories": "node --env-file=.env scripts/setup-group-categories.mjs",
+    "db:categories": "npm run db:group-categories && node --env-file=.env scripts/setup-categories.mjs",
+    "db:subcategories": "npm run db:categories && node --env-file=.env scripts/setup-subcategories.mjs",
     "admin:add": "node --env-file=.env scripts/create-admin.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
+    "@aws-sdk/s3-request-presigner": "^3.1153.0",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
@@ -49,6 +54,7 @@
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "date-fns": "3.6.0",
+    "dotenv": "^18.0.8",
     "embla-carousel-react": "8.6.0",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",

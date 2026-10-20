@@ -154,7 +154,7 @@ export function UsersPage() {
       }
       setModal(false);
     } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to connect to Neon database API.");
+      setErrorMsg(err?.message || "Failed to connect to database API.");
     } finally {
       setSaving(false);
     }
@@ -173,15 +173,15 @@ export function UsersPage() {
   return (
     <div className="space-y-5">
       <PageHeader breadcrumb="Miscellaneous / Users" title="Admin Users"
-        subtitle="Manage Neon PostgreSQL admin accounts, roles and table records" count={rows.length}>
+        subtitle="Manage administrator accounts, permissions, and security roles" count={rows.length}>
         <div className="flex items-center gap-2">
           <button
             onClick={fetchAdmins}
-            title="Refresh from Neon DB"
+            title="Refresh Admin Users"
             className="p-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-all flex items-center gap-1.5 text-xs font-semibold"
           >
             <RefreshCw size={14} className={loading ? "animate-spin text-emerald-600" : ""} />
-            <span className="hidden sm:inline">Sync Neon DB</span>
+            <span className="hidden sm:inline">Sync Database</span>
           </button>
           <button onClick={openAdd} className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white shadow-sm hover:opacity-95 transition-all" style={{ background: G }}>
             <Plus size={15}/> Add Admin to Table
@@ -196,7 +196,7 @@ export function UsersPage() {
             <Database size={16} />
           </div>
           <div>
-            <p className="font-bold text-gray-800">Neon PostgreSQL Table: <span className="font-mono text-emerald-700">admins</span></p>
+            <p className="font-bold text-gray-800">Database Table: <span className="font-mono text-emerald-700">admins</span></p>
             <p className="text-[11px] text-gray-500">Live credential storage with bcrypt hashing and active session checks.</p>
           </div>
         </div>
@@ -317,7 +317,7 @@ export function UsersPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-sm text-gray-400">
-                    {loading ? "Loading admins from Neon database..." : "No admins match your filters"}
+                    {loading ? "Loading admin users from database..." : "No admins match your filters"}
                   </td>
                 </tr>
               )}
@@ -327,7 +327,7 @@ export function UsersPage() {
       </SectionCard>
 
       {/* Add / Edit Modal */}
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? "Edit Admin" : "Add Admin to Neon Table"}>
+      <Modal open={modal} onClose={() => setModal(false)} title={editing ? "Edit Admin" : "Add Admin User"}>
         <div className="space-y-3">
           {errorMsg && (
             <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 font-semibold">
@@ -415,7 +415,7 @@ export function UsersPage() {
               style={{ background: G }}
             >
               {saving ? <RefreshCw size={14} className="animate-spin" /> : null}
-              {saving ? "Saving to Neon..." : editing ? "Save Changes" : "Insert to Neon Table"}
+              {saving ? "Saving..." : editing ? "Save Changes" : "Save Admin User"}
             </button>
           </div>
         </div>

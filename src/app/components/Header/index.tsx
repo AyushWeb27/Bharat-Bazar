@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Search, ShoppingCart, Heart, Menu, X, Home, IndianRupee, Bell,
+  Search, ShoppingCart, Heart, Menu, X, Home, IndianRupee, Bell, CheckCircle, LogOut,
 } from "lucide-react";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { G, CATEGORIES } from "../data/index";
 import type { Page } from "../types/index";
+import { useApp } from "../../context/AppContext";
 
 const NOTIFS = [
   { id:1, icon:"📦", text:"Your order #BB2610050001 has been shipped!", time:"2 min ago", unread:true },
@@ -18,6 +19,7 @@ export function Header({ dark, setDark, cart, wish, page, setPage, query, setQue
   dark:boolean; setDark:(v:boolean)=>void; cart:number[]; wish:Set<number>;
   page:Page; setPage:(p:Page)=>void; query:string; setQuery:(s:string)=>void;
 }) {
+  const { user, logoutUser } = useApp();
   const [mob, setMob] = useState(false);
   const [searchFocus, setSearchFocus] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -229,15 +231,32 @@ export function Header({ dark, setDark, cart, wish, page, setPage, query, setQue
               {/* ── PROFILE ICON (unique component) ── */}
               <ProfileAvatar dark={dark} setDark={setDark} setPage={setPage} wish={wish} />
 
-              {/* Mobile: compact Sign In button */}
-              <motion.button
-                whileTap={{ scale: 0.93 }}
-                onClick={() => setPage("signin")}
-                className="md:hidden flex items-center gap-1 text-[11px] font-black px-3 py-1.5 rounded-xl border text-white shrink-0"
-                style={{ background: `linear-gradient(135deg, ${G}, #00cc88)`, borderColor: "transparent" }}
-              >
-                Sign In
-              </motion.button>
+              {/* Mobile: compact Sign In / Account button */}
+              {user ? (
+                <motion.button
+                  whileTap={{ scale: 0.93 }}
+                  onClick={() => setPage("account")}
+                  className="md:hidden flex items-center gap-1.5 text-[11px] font-black px-2.5 py-1.5 rounded-xl border border-[#009966]/30 bg-[#009966]/10 text-[#009966] shrink-0"
+                >
+                  <span className="w-5 h-5 rounded-full bg-[#009966] text-white flex items-center justify-center text-[10px] overflow-hidden">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      user.name.charAt(0).toUpperCase()
+                    )}
+                  </span>
+                  <span className="max-w-[60px] truncate">{user.name.split(" ")[0]}</span>
+                </motion.button>
+              ) : (
+                <motion.button
+                  whileTap={{ scale: 0.93 }}
+                  onClick={() => setPage("signin")}
+                  className="md:hidden flex items-center gap-1 text-[11px] font-black px-3 py-1.5 rounded-xl border text-white shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${G}, #00cc88)`, borderColor: "transparent" }}
+                >
+                  Sign In
+                </motion.button>
+              )}
 
               {/* Mobile menu toggle */}
               <motion.button whileTap={{ scale:0.88 }}
@@ -296,19 +315,46 @@ export function Header({ dark, setDark, cart, wish, page, setPage, query, setQue
                 <div className="absolute -bottom-6 -right-6 w-24 h-24 rounded-full bg-white/10"/>
                 <div className="relative flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center font-black text-white text-lg">G</div>
-                    <div>
-                      <p className="text-white font-black text-sm">Guest User</p>
-                      <p className="text-white/70 text-[10px]">भारत बाज़ार Member</p>
+                    <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center font-black text-white text-lg overflow-hidden shrink-0">
+                      {user?.avatar_url ? (
+                        <img src={user.avatar_url} alt={user.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        user ? user.name.charAt(0).toUpperCase() : "G"
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white font-black text-sm truncate">{user ? user.name : "Guest User"}</p>
+                      <p className="text-white/80 text-[10px] truncate">
+                        {user ? user.email : "भारत बाज़ार Member"}
+                      </p>
+                      {user?.email_verified && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-white bg-black/20 px-2 py-0.5 rounded-full mt-1">
+                          <CheckCircle size={9} /> Email Verified
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button onClick={() => setMob(false)} className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+                  <button onClick={() => setMob(false)} className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
                     <X size={16} className="text-white"/>
                   </button>
                 </div>
-                <div className="flex gap-2 mt-3 relative">
-                  <button onClick={() => { setPage("signin"); setMob(false); }} className="flex-1 bg-white text-xs font-black py-1.5 rounded-lg" style={{ color:G }}>Sign In</button>
-                  <button onClick={() => { setPage("register"); setMob(false); }} className="flex-1 bg-white/20 text-white text-xs font-black py-1.5 rounded-lg border border-white/30">Register</button>
+                <div className="flex gap-2 mt-3.5 relative">
+                  {user ? (
+                    <button
+                      onClick={async () => {
+                        await logoutUser();
+                        setMob(false);
+                      }}
+                      className="flex-1 bg-white/20 text-white text-xs font-black py-2 rounded-lg border border-white/30 flex items-center justify-center gap-1.5 hover:bg-white/30 transition-colors"
+                    >
+                      <LogOut size={13} /> Sign Out
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={() => { setPage("signin"); setMob(false); }} className="flex-1 bg-white text-xs font-black py-2 rounded-lg" style={{ color:G }}>Sign In</button>
+                      <button onClick={() => { setPage("register"); setMob(false); }} className="flex-1 bg-white/20 text-white text-xs font-black py-2 rounded-lg border border-white/30">Register</button>
+                    </>
+                  )}
                 </div>
               </div>
 

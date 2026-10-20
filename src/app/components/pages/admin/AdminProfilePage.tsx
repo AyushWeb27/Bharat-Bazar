@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import {
   User, Mail, Phone, Shield, KeyRound, Lock, Eye, EyeOff,
   CheckCircle2, AlertCircle, RefreshCw, Calendar, Clock,
   Sparkles, Database, BadgeCheck, HardDrive, ShieldCheck,
-  Save, Building, FileText, ArrowRight
+  Save, Building, FileText, ArrowRight, Camera
 } from "lucide-react";
 import { PageHeader, SectionCard } from "./shared/ui";
 import { G, GD, inp } from "./shared/constants";
@@ -35,6 +35,9 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // Profile fields
   const [profile, setProfile] = useState<AdminProfileData>({
@@ -81,6 +84,17 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
     loadProfile();
   }, []);
 
+  useEffect(() => {
+    if (!selectedImage) {
+      setImagePreview("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(selectedImage);
+    setImagePreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [selectedImage]);
+
   // Save general profile details
   const handleSaveProfile = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -94,6 +108,23 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
     setSuccessMsg("");
 
     try {
+      let avatarUrl = profile.avatar_url;
+      if (selectedImage) {
+        const imageForm = new FormData();
+        imageForm.set("image", selectedImage);
+        const imageResponse = await fetch("/api/admin/profile/image", {
+          method: "POST",
+          body: imageForm,
+        });
+        const imageData = await imageResponse.json();
+        if (!imageResponse.ok || !imageData.success) {
+          setErrorMsg(imageData.message || "Failed to save profile image.");
+          return;
+        }
+        avatarUrl = imageData.avatar_url;
+        setProfile(current => ({ ...current, avatar_url: avatarUrl }));
+      }
+
       const res = await fetch("/api/admin/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -103,7 +134,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
           phone: profile.phone.trim(),
           designation: profile.designation.trim(),
           bio: profile.bio.trim(),
-          avatar_url: profile.avatar_url.trim(),
+          avatar_url: avatarUrl.trim(),
         }),
       });
 
@@ -115,7 +146,8 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
       }
 
       setProfile(data.profile);
-      setSuccessMsg("Profile details successfully updated in Neon Database!");
+      setSelectedImage(null);
+      setSuccessMsg("Profile details successfully updated!");
 
       if (onProfileUpdated) {
         onProfileUpdated({
@@ -131,6 +163,26 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleProfileImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setSelectedImage(null);
+      setErrorMsg("Use a JPEG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size === 0 || file.size > 5 * 1024 * 1024) {
+      setSelectedImage(null);
+      setErrorMsg("Image must be between 1 byte and 5 MB.");
+      return;
+    }
+
+    setErrorMsg("");
+    setSelectedImage(file);
   };
 
   // Save new password
@@ -170,7 +222,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
         return;
       }
 
-      setSuccessMsg("Password changed and hashed in Neon database successfully!");
+      setSuccessMsg("Password changed successfully!");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -201,7 +253,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
         <div className="flex items-center gap-2">
           <button
             onClick={loadProfile}
-            title="Reload from Neon DB"
+            title="Reload Profile"
             className="p-2.5 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-all flex items-center gap-1.5 text-xs font-semibold"
           >
             <RefreshCw size={14} className={loading ? "animate-spin text-emerald-600" : ""} />
@@ -264,12 +316,36 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
             {/* Avatar / Initials */}
             <div className="relative group">
               <div
-                className="w-20 h-20 md:w-24 md:h-24 rounded-2xl flex items-center justify-center text-2xl md:text-3xl font-black text-white shadow-2xl border-2 border-white/20"
+                className="w-20 h-20 md:w-24 md:h-24 rounded-2xl flex items-center justify-center text-2xl md:text-3xl font-black text-white shadow-2xl border-2 border-white/20 overflow-hidden"
                 style={{ background: `linear-gradient(135deg, ${G}, #00cc88)` }}
               >
-                {initials}
+                {imagePreview || profile.avatar_url ? (
+                  <img
+                    src={imagePreview || profile.avatar_url}
+                    alt={`${profile.name} profile`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : initials}
               </div>
-              <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-[#050f0a] flex items-center justify-center" title="Account Active">
+              <button
+                type="button"
+                aria-label="Change administrator profile image"
+                title="Change profile image"
+                disabled={saving}
+                onClick={() => imageInputRef.current?.click()}
+                className="absolute -bottom-2 -right-2 w-8 h-8 rounded-xl flex items-center justify-center text-white shadow-lg border-2 border-[#081610] disabled:opacity-60"
+                style={{ background: G }}
+              >
+                <Camera size={14} />
+              </button>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleProfileImageChange}
+              />
+              <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-[#050f0a] flex items-center justify-center" title="Account Active">
                 <BadgeCheck size={14} className="text-white" />
               </div>
             </div>
@@ -281,7 +357,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
                   {profile.role === "superadmin" ? "Super Admin" : profile.role}
                 </span>
                 <span className="text-[11px] text-white/50 flex items-center gap-1">
-                  <Database size={11} className="text-emerald-400" /> Neon PostgreSQL
+                  <Database size={11} className="text-emerald-400" /> PostgreSQL Database
                 </span>
                 <span className="text-[11px] text-white/40 font-mono">
                   ID: #{profile.id}
@@ -295,6 +371,9 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
               </p>
               <p className="text-white/50 text-xs mt-1">
                 {profile.email}
+              </p>
+              <p className="text-white/50 text-[11px] mt-1" aria-live="polite">
+                {selectedImage ? "Image selected. Save Profile to upload it." : "JPEG, PNG, or WebP (max 5 MB)"}
               </p>
             </div>
           </div>
@@ -374,7 +453,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
                   <p className="text-xs text-gray-500">Update how your administrator identity appears across BharatBazar</p>
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full font-bold">
-                  <Database size={12} /> Neon Table
+                  <Database size={12} /> Database Table
                 </div>
               </div>
 
@@ -648,7 +727,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
                   { title: "Bcrypt Hashing", desc: "Password stored with salt rounds (10)", ok: true },
                   { title: "HTTP-Only Cookie", desc: "Prevents XSS session hijacking", ok: true },
                   { title: "HMAC-SHA256 Token", desc: "Tamper-proof payload verification", ok: true },
-                  { title: "Neon SSL Mode", desc: "Enforced TLS 1.3 encryption in transit", ok: true },
+                  { title: "SSL Security", desc: "Enforced TLS 1.3 encryption in transit", ok: true },
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-start gap-2.5 text-xs">
                     <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
@@ -679,7 +758,7 @@ export function AdminProfilePage({ currentAdmin, onProfileUpdated }: AdminProfil
                 </div>
                 <div>
                   <h4 className="text-sm font-black text-gray-900">Database Engine</h4>
-                  <p className="text-[11px] text-gray-500">PostgreSQL (Neon Serverless)</p>
+                  <p className="text-[11px] text-gray-500">PostgreSQL Database</p>
                 </div>
               </div>
               <p className="text-xs text-gray-600 leading-relaxed">

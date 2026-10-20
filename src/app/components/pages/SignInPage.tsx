@@ -3,10 +3,13 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Eye, EyeOff, Mail, Lock, ArrowRight,
   IndianRupee, ChevronLeft, ShieldCheck, Smartphone,
-  Star, BadgeCheck, Zap, Gift,
+  Star, BadgeCheck, Zap, Gift, CheckCircle2, KeyRound, Database,
 } from "lucide-react";
 import { G, GD } from "../data/index";
 import type { Page } from "../types/index";
+import { useApp } from "../../context/AppContext";
+import { GoogleSignInButton } from "../auth/GoogleSignInButton";
+import { OtpLiveViewerModal } from "../auth/OtpLiveViewerModal";
 
 const BENEFITS = [
   { icon: <Zap size={16} />,        text: "Lightning-fast delivery across India" },
@@ -16,6 +19,7 @@ const BENEFITS = [
 ];
 
 export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
+  const { refreshUser } = useApp();
   const [mode, setMode]         = useState<"phone" | "email">("phone");
   const [step, setStep]         = useState<"input" | "otp" | "password">("input");
   const [phone, setPhone]       = useState("");
@@ -23,9 +27,12 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [otp, setOtp]           = useState(["","","","","",""]);
-  const [remember, setRemember] = useState(false);
+  const [latestOtp, setLatestOtp] = useState("");
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [otpTimer, setOtpTimer] = useState(30);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -42,22 +49,144 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
     const next = [...otp]; next[idx] = val; setOtp(next);
     if (val && idx < 5) (document.getElementById(`otp-si-${idx + 1}`) as HTMLInputElement)?.focus();
   };
+
   const handleOtpKey = (e: React.KeyboardEvent, idx: number) => {
     if (e.key === "Backspace" && !otp[idx] && idx > 0)
       (document.getElementById(`otp-si-${idx - 1}`) as HTMLInputElement)?.focus();
   };
 
-  const handleContinue = () => {
-    setError("");
-    if (mode === "phone" && phone.length < 10) { setError("Please enter a valid 10-digit mobile number"); return; }
-    if (mode === "email" && !email.includes("@")) { setError("Please enter a valid email address"); return; }
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setStep(mode === "phone" ? "otp" : "password"); }, 900);
+  const fillOtp = (code: string) => {
+    const chars = code.split("").slice(0, 6);
+    while (chars.length < 6) chars.push("");
+    setOtp(chars);
   };
 
-  const handleSignIn = () => {
+  const sendOtpRequest = async (targetPhone: string) => {
     setLoading(true);
-    setTimeout(() => { setLoading(false); setPage("home"); }, 1200);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: targetPhone, type: "phone_login" }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message || "Failed to generate OTP.");
+        setLoading(false);
+        return false;
+      }
+      setLatestOtp(data.otp);
+      setSuccessMsg(`✓ Verification code: ${data.otp}`);
+      setStep("otp");
+      return true;
+    } catch (err: any) {
+      setError(err?.message || "Failed to send OTP.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    setError("");
+    setSuccessMsg("");
+    if (mode === "phone") {
+      if (phone.length < 10) {
+        setError("Please enter a valid 10-digit mobile number");
+        return;
+      }
+      await sendOtpRequest(phone);
+    } else {
+      if (!email.includes("@") || !email.includes(".")) {
+        setError("Please enter a valid email address");
+        return;
+      }
+      setLoading(true);
+      setTimeout(() => {
+        setLoading(false);
+        setStep("password");
+      }, 250);
+    }
+  };
+
+  const handleSignIn = async () => {
+    setError("");
+    setSuccessMsg("");
+    setLoading(true);
+
+    try {
+      if (mode === "email") {
+        if (!password) {
+          setError("Please enter your password.");
+          setLoading(false);
+          return;
+        }
+
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          setError(data.message || "Invalid email or password.");
+          setLoading(false);
+          return;
+        }
+
+        setSuccessMsg(`✓ Welcome back, ${data.user.name}!`);
+        await refreshUser();
+        setTimeout(() => {
+          setPage("home");
+        }, 700);
+      } else {
+        const otpCode = otp.join("");
+        if (otpCode.length < 6) {
+          setError("Please enter the complete 6-digit OTP");
+          setLoading(false);
+          return;
+        }
+
+        // Verify against Neon database otps table
+        const res = await fetch("/api/auth/otp/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: phone, otp: otpCode, type: "phone_login" }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          setError(data.message || "Mobile OTP verification failed.");
+          setLoading(false);
+          return;
+        }
+
+        setSuccessMsg(`✓ Verified! Welcome, ${data.user.name}.`);
+        await refreshUser();
+        setTimeout(() => {
+          setPage("home");
+        }, 700);
+      }
+    } catch (err: any) {
+      console.error("Sign in error:", err);
+      setError(err?.message || "Failed to sign in. Please check your network.");
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSuccess = async (googleUser: any) => {
+    setError("");
+    setSuccessMsg(`✓ Google sign in successful! Welcome, ${googleUser.name}. Email verified in database.`);
+    await refreshUser();
+    setTimeout(() => {
+      setPage("home");
+    }, 700);
+  };
+
+  const handleGoogleError = (err: string) => {
+    setError(err);
   };
 
   const label = "block text-xs font-bold text-foreground mb-1.5 tracking-wide";
@@ -137,7 +266,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
 
         {/* Bottom trust */}
         <div className="relative z-10 flex items-center gap-4">
-          {["5 Cr+ Users", "4.8★ Rated", "Govt. Verified"].map(t => (
+          {["5 Cr+ Users", "4.8★ Rated", "100% Verified"].map(t => (
             <div key={t} className="flex items-center gap-1">
               <Star size={10} fill="#6effc4" className="text-transparent" />
               <span className="text-white/50 text-[10px] font-semibold">{t}</span>
@@ -161,7 +290,18 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-5 py-10 md:px-16">
+        {/* Recent OTPs Banner Trigger */}
+        <div className="px-5 pt-4 md:px-16 flex justify-end">
+          <button
+            onClick={() => setShowOtpModal(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border border-[#009966]/30 bg-[#009966]/10 text-[#009966] hover:bg-[#009966]/20 transition-colors shadow-sm"
+          >
+            <Database size={13} />
+            <span>View Recent OTPs</span>
+          </button>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center px-5 py-6 md:px-16">
           <div className="w-full max-w-sm">
 
             <AnimatePresence mode="wait">
@@ -174,18 +314,18 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                 >
                   <div className="mb-7">
                     <h1 className="text-2xl font-black text-foreground mb-1">Welcome back!</h1>
-                    <p className="text-muted-foreground text-sm">Sign in to your BharatBazar account</p>
+                    <p className="text-muted-foreground text-sm">Sign in with Mobile OTP, Email, or Google</p>
                   </div>
 
                   {/* Tab toggle */}
                   <div className="flex bg-muted rounded-xl p-1 mb-6 gap-1">
                     {(["phone", "email"] as const).map(m => (
-                      <button key={m} onClick={() => { setMode(m); setError(""); }}
+                      <button key={m} onClick={() => { setMode(m); setError(""); setSuccessMsg(""); }}
                         className="flex-1 py-2.5 rounded-lg text-xs font-bold transition-all"
                         style={mode === m
                           ? { background: G, color: "#fff", boxShadow: `0 2px 8px ${G}55` }
                           : { color: "var(--muted-foreground)" }}>
-                        {m === "phone" ? "📱  Mobile OTP" : "✉️  Email"}
+                        {m === "phone" ? "📱 Mobile OTP" : "✉️ Email & Password"}
                       </button>
                     ))}
                   </div>
@@ -220,47 +360,44 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                     {error && (
                       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                         className="text-red-500 text-xs font-semibold flex items-center gap-1.5">
-                        <span className="w-1 h-1 rounded-full bg-red-500 inline-block" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block shrink-0" />
                         {error}
                       </motion.p>
                     )}
 
+                    {successMsg && (
+                      <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                        className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+                        <CheckCircle2 size={16} className="shrink-0" />
+                        <span>{successMsg}</span>
+                      </motion.div>
+                    )}
+
                     <motion.button whileTap={{ scale: 0.98 }} onClick={handleContinue} disabled={loading}
-                      className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 transition-opacity"
+                      className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 transition-opacity shadow-md"
                       style={{ background: `linear-gradient(to right, ${GD}, ${G})`, boxShadow: `0 4px 16px ${G}44` }}>
                       {loading ? (
                         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.7, ease: "linear" }}
                           className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
                       ) : (
-                        <>{mode === "phone" ? "Request OTP" : "Continue"} <ArrowRight size={15} /></>
+                        <>{mode === "phone" ? "Send OTP Code" : "Continue to Password"} <ArrowRight size={15} /></>
                       )}
                     </motion.button>
                   </div>
 
                   <div className="flex items-center gap-3 my-5">
                     <div className="flex-1 h-px bg-border" />
-                    <span className="text-[11px] text-muted-foreground font-semibold">OR</span>
+                    <span className="text-[11px] text-muted-foreground font-semibold">OR SIGN IN WITH</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}
-                      className="flex items-center justify-center gap-2 py-3 rounded-xl border border-border bg-card text-sm font-bold text-foreground hover:border-[#009966]/40 transition-all">
-                      <svg width="16" height="16" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                      </svg>
-                      Google
-                    </motion.button>
-                    <motion.button whileHover={{ y: -2 }} whileTap={{ scale: 0.97 }}
-                      className="flex items-center justify-center gap-2 py-3 rounded-xl border border-zinc-800 bg-zinc-900 text-sm font-bold text-white hover:bg-zinc-800 transition-all">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
-                      </svg>
-                      Apple
-                    </motion.button>
+                  {/* Official Google OAuth Sign In */}
+                  <div>
+                    <GoogleSignInButton
+                      buttonText="Continue with Google"
+                      onSuccess={handleGoogleSuccess}
+                      onError={handleGoogleError}
+                    />
                   </div>
 
                   <p className="text-center text-xs text-muted-foreground mt-6">
@@ -279,24 +416,52 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                   initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
                   transition={{ duration: 0.25 }}
                 >
-                  <button onClick={() => setStep("input")}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-7 transition-colors font-semibold">
+                  <button onClick={() => { setStep("input"); setError(""); }}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-5 transition-colors font-semibold">
                     <ChevronLeft size={15} /> Back
                   </button>
 
-                  {/* Icon */}
-                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-                    style={{ background: `${G}15` }}>
-                    <Smartphone size={28} style={{ color: G }} />
+                  {/* OTP Notification Card with Neon DB Code */}
+                  {latestOtp && (
+                    <motion.div
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="mb-6 p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between shadow-sm"
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-0.5">
+                          <Database size={12} /> Verification Code
+                        </div>
+                        <p className="text-2xl font-black font-mono tracking-widest text-[#009966]">
+                          {latestOtp}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => fillOtp(latestOtp)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-black text-white shadow-sm hover:opacity-90 transition-opacity"
+                        style={{ background: G }}
+                      >
+                        Auto-Fill
+                      </button>
+                    </motion.div>
+                  )}
+
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ background: `${G}15` }}>
+                      <Smartphone size={20} style={{ color: G }} />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-black text-foreground">Verify Mobile OTP</h2>
+                      <p className="text-muted-foreground text-xs">
+                        Sent to <span className="font-bold text-foreground">+91 {phone}</span>
+                      </p>
+                    </div>
                   </div>
 
-                  <h2 className="text-2xl font-black text-foreground mb-1">Verify your mobile</h2>
-                  <p className="text-muted-foreground text-sm mb-7">
-                    OTP sent to <span className="font-bold text-foreground">+91 {phone}</span>
-                  </p>
-
                   {/* OTP boxes */}
-                  <div className="flex gap-2 xs:gap-2.5 mb-5 w-full max-w-xs mx-auto">
+                  <div className="flex gap-2 xs:gap-2.5 my-6 w-full max-w-xs mx-auto">
                     {otp.map((d, i) => (
                       <input key={i} id={`otp-si-${i}`} value={d} maxLength={1} type="tel"
                         onChange={e => handleOtpChange(e.target.value, i)}
@@ -310,18 +475,44 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                     ))}
                   </div>
 
-                  {/* Timer */}
-                  <p className="text-xs text-muted-foreground mb-5">
-                    {otpTimer > 0
-                      ? <span>Resend OTP in <span className="font-bold text-foreground">{otpTimer}s</span></span>
-                      : <button className="font-bold hover:underline" style={{ color: G }}
-                          onClick={() => setOtpTimer(30)}>Resend OTP</button>
-                    }
-                  </p>
+                  {error && (
+                    <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      className="text-red-500 text-xs font-semibold mb-4 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block shrink-0" />
+                      {error}
+                    </motion.p>
+                  )}
+
+                  {successMsg && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                      className="p-3 mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+                      <CheckCircle2 size={16} className="shrink-0" />
+                      <span>{successMsg}</span>
+                    </motion.div>
+                  )}
+
+                  {/* Resend and Live Viewer Row */}
+                  <div className="flex items-center justify-between text-xs mb-5">
+                    <p className="text-muted-foreground">
+                      {otpTimer > 0
+                        ? <span>Resend in <span className="font-bold text-foreground">{otpTimer}s</span></span>
+                        : <button className="font-bold hover:underline" style={{ color: G }}
+                            onClick={() => sendOtpRequest(phone)}>Resend OTP</button>
+                      }
+                    </p>
+
+                    <button
+                      onClick={() => setShowOtpModal(true)}
+                      className="font-bold flex items-center gap-1 hover:underline text-xs"
+                      style={{ color: G }}
+                    >
+                      <KeyRound size={12} /> View OTPs
+                    </button>
+                  </div>
 
                   <motion.button whileTap={{ scale: 0.98 }} onClick={handleSignIn}
                     disabled={otp.join("").length < 6 || loading}
-                    className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                    className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-md"
                     style={{ background: `linear-gradient(to right, ${GD}, ${G})`, boxShadow: `0 4px 16px ${G}44` }}>
                     {loading ? (
                       <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.7, ease: "linear" }}
@@ -337,7 +528,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                   initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}
                   transition={{ duration: 0.25 }}
                 >
-                  <button onClick={() => setStep("input")}
+                  <button onClick={() => { setStep("input"); setError(""); }}
                     className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-7 transition-colors font-semibold">
                     <ChevronLeft size={15} /> Back
                   </button>
@@ -346,7 +537,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                     <Lock size={28} style={{ color: G }} />
                   </div>
 
-                  <h2 className="text-2xl font-black text-foreground mb-1">Enter password</h2>
+                  <h2 className="text-2xl font-black text-foreground mb-1">Enter your password</h2>
                   <p className="text-muted-foreground text-sm mb-7">
                     Signing in as <span className="font-bold text-foreground">{email}</span>
                   </p>
@@ -359,17 +550,34 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                         <input value={password} onChange={e => setPassword(e.target.value)}
                           type={showPass ? "text" : "password"} placeholder="Your password"
                           className={`${inp} pl-10 pr-12`}
+                          autoFocus
                           onKeyDown={e => e.key === "Enter" && handleSignIn()} />
-                        <button onClick={() => setShowPass(v => !v)}
+                        <button type="button" onClick={() => setShowPass(v => !v)}
                           className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                           {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                         </button>
                       </div>
                     </div>
 
+                    {error && (
+                      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                        className="text-red-500 text-xs font-semibold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block shrink-0" />
+                        {error}
+                      </motion.p>
+                    )}
+
+                    {successMsg && (
+                      <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                        className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+                        <CheckCircle2 size={16} className="shrink-0" />
+                        <span>{successMsg}</span>
+                      </motion.div>
+                    )}
+
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
-                        <button onClick={() => setRemember(v => !v)}
+                        <button type="button" onClick={() => setRemember(v => !v)}
                           className="w-10 h-5.5 rounded-full relative transition-colors"
                           style={{ background: remember ? G : "var(--muted-foreground)", height: 22, width: 40 }}>
                           <motion.div layout transition={{ type: "spring", stiffness: 500, damping: 35 }}
@@ -378,7 +586,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
                         </button>
                         <span className="text-xs text-muted-foreground font-medium">Remember me</span>
                       </label>
-                      <button onClick={() => setPage("forgot-password" as any)}
+                      <button type="button" onClick={() => setPage("forgot-password" as any)}
                         className="text-xs font-bold hover:underline" style={{ color: G }}>
                         Forgot password?
                       </button>
@@ -386,12 +594,12 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
 
                     <motion.button whileTap={{ scale: 0.98 }} onClick={handleSignIn}
                       disabled={!password || loading}
-                      className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 disabled:opacity-50"
+                      className="w-full py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
                       style={{ background: `linear-gradient(to right, ${GD}, ${G})`, boxShadow: `0 4px 16px ${G}44` }}>
                       {loading ? (
                         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.7, ease: "linear" }}
                           className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-                      ) : <>Sign In <ArrowRight size={15} /></>}
+                      ) : <>Sign In &amp; Verify <ArrowRight size={15} /></>}
                     </motion.button>
                   </div>
                 </motion.div>
@@ -400,13 +608,20 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
 
             {/* Bottom trust strip */}
             <div className="mt-8 pt-6 border-t border-border flex items-center justify-center gap-5 flex-wrap">
-              {["🔒 SSL Secured", "✅ 100% Safe", "🏆 5Cr+ Users"].map(t => (
+              {["🔒 SSL Encrypted", "✅ 100% Safe & Secure", "🏆 5Cr+ Users"].map(t => (
                 <span key={t} className="text-[10px] text-muted-foreground font-semibold">{t}</span>
               ))}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Live Neon DB OTP Modal */}
+      <OtpLiveViewerModal
+        isOpen={showOtpModal}
+        onClose={() => setShowOtpModal(false)}
+        onSelectOtp={fillOtp}
+      />
     </div>
   );
 }

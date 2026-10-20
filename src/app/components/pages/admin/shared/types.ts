@@ -1,8 +1,8 @@
-export type { Page } from "../../types/index";
+export type { Page } from "../../../types/index";
 
-export type GroupCat    = { id: number; name: string; slug: string; color: string; cats: number; products: number; active: boolean };
-export type Cat         = { id: number; name: string; slug: string; group: string; emoji: string; products: number; active: boolean };
-export type SubCat      = { id: number; name: string; slug: string; parent: string; products: number; sort: number; active: boolean };
+export type GroupCat    = { id: number; name: string; slug: string; color: string; cats: number; products: number; active: boolean; description?: string };
+export type Cat         = { id: number; name: string; slug: string; group: string; group_id?: number; emoji: string; image_url?: string; products: number; active: boolean };
+export type SubCat      = { id: number; name: string; slug: string; parent: string; parent_id?: number; emoji?: string; image_url?: string; products: number; sort: number; active: boolean };
 export type Product     = { id: number; name: string; sku: string; cat: string; subcat: string; emoji: string; mrp: number; price: number; stock: number; status: "active"|"inactive"|"out_of_stock"|"low_stock"; featured: boolean };
 export type ProdRequest = { id: number; product: string; vendor: string; vendorInit: string; cat: string; price: number; date: string; status: "pending"|"approved"|"rejected"; note: string };
 export type TaxRule     = { id: number; name: string; slab: number; type: "GST"|"IGST"|"Customs"; category: string; products: number; active: boolean };

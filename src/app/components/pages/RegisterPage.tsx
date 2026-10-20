@@ -2,11 +2,15 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Eye, EyeOff, Mail, Lock, User, ArrowRight,
-  IndianRupee, ChevronLeft, CheckCircle,
+  IndianRupee, ChevronLeft, CheckCircle, CheckCircle2,
   Smartphone, Gift, ShieldCheck, Truck, BadgePercent,
+  KeyRound, Database,
 } from "lucide-react";
 import { G, GD } from "../data/index";
 import type { Page } from "../types/index";
+import { useApp } from "../../context/AppContext";
+import { GoogleSignInButton } from "../auth/GoogleSignInButton";
+import { OtpLiveViewerModal } from "../auth/OtpLiveViewerModal";
 
 const STEPS = [
   { label: "Personal Info",   short: "Info"   },
@@ -22,38 +26,42 @@ const PERKS = [
 ];
 
 export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
+  const { refreshUser } = useApp();
   const [step,        setStep]        = useState(0);
   const [name,        setName]        = useState("");
   const [email,       setEmail]       = useState("");
   const [phone,       setPhone]       = useState("");
   const [otp,         setOtp]         = useState(["","","","","",""]);
+  const [latestOtp,   setLatestOtp]   = useState("");
+  const [showOtpModal, setShowOtpModal] = useState(false);
   const [password,    setPassword]    = useState("");
   const [confirm,     setConfirm]     = useState("");
   const [showPass,    setShowPass]    = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [gender,      setGender]      = useState("");
   const [dob,         setDob]         = useState("");
-  const [agreed,      setAgreed]      = useState(false);
+  const [agreed,      setAgreed]      = useState(true);
   const [loading,     setLoading]     = useState(false);
   const [errors,      setErrors]      = useState<Record<string, string>>({});
+  const [successMsg,  setSuccessMsg]  = useState("");
 
   const label = "block text-xs font-bold text-foreground mb-1.5 tracking-wide";
   const inp   = "w-full border border-border rounded-lg px-3.5 py-3 text-sm text-foreground bg-background placeholder:text-muted-foreground outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all";
 
   const validate0 = () => {
     const e: Record<string, string> = {};
-    if (!name.trim())        e.name  = "Full name is required";
-    if (!email.includes("@")) e.email = "Enter a valid email address";
-    if (phone.length < 10)   e.phone = "Enter a valid 10-digit number";
+    if (!name.trim()) e.name = "Full name is required";
+    if (!email.includes("@") || !email.includes(".")) e.email = "Enter a valid email address";
+    if (phone.length < 10) e.phone = "Enter a valid 10-digit number";
     setErrors(e);
     return !Object.keys(e).length;
   };
 
   const validate2 = () => {
     const e: Record<string, string> = {};
-    if (password.length < 8)    e.password = "Minimum 8 characters required";
-    if (password !== confirm)    e.confirm  = "Passwords do not match";
-    if (!agreed)                 e.agreed   = "Please accept terms to continue";
+    if (password.length < 6) e.password = "Minimum 6 characters required";
+    if (password !== confirm) e.confirm = "Passwords do not match";
+    if (!agreed) e.agreed = "Please accept terms to continue";
     setErrors(e);
     return !Object.keys(e).length;
   };
@@ -64,17 +72,133 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
     if (val && idx < 5) (document.getElementById(`rotp-${idx + 1}`) as HTMLInputElement)?.focus();
   };
 
-  const nextStep = () => {
+  const fillOtp = (code: string) => {
+    const chars = code.split("").slice(0, 6);
+    while (chars.length < 6) chars.push("");
+    setOtp(chars);
+  };
+
+  const sendRegistrationOtp = async (targetPhone: string) => {
+    setLoading(true);
     setErrors({});
-    if (step === 0 && !validate0()) return;
+    try {
+      const res = await fetch("/api/auth/otp/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: targetPhone, type: "registration" }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErrors({ form: data.message || "Failed to generate registration OTP." });
+        setLoading(false);
+        return false;
+      }
+      setLatestOtp(data.otp);
+      setSuccessMsg(`✓ Registration code: ${data.otp}`);
+      setStep(1);
+      return true;
+    } catch (err: any) {
+      setErrors({ form: err?.message || "Failed to send OTP." });
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const nextStep = async () => {
+    setErrors({});
+    setSuccessMsg("");
+
+    // Step 0 -> Step 1 (Trigger Neon DB registration OTP)
+    if (step === 0) {
+      if (!validate0()) return;
+      await sendRegistrationOtp(phone);
+      return;
+    }
+
+    // Step 1 -> Step 2 (Verify OTP in Neon DB otps table)
+    if (step === 1) {
+      const otpCode = otp.join("");
+      if (otpCode.length < 6) {
+        setErrors({ form: "Please enter the complete 6-digit OTP code." });
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const res = await fetch("/api/auth/otp/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: phone, otp: otpCode, type: "registration" }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          setErrors({ form: data.message || "Invalid or expired OTP. Please enter the correct code." });
+          setLoading(false);
+          return;
+        }
+
+        setSuccessMsg("✓ Mobile verified! Now set your password.");
+        setLoading(false);
+        setStep(2);
+      } catch (err: any) {
+        setErrors({ form: err?.message || "Failed to verify OTP." });
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Step 2 -> Complete registration
     if (step === 2) {
       if (!validate2()) return;
       setLoading(true);
-      setTimeout(() => { setLoading(false); setPage("home"); }, 1200);
-      return;
+
+      try {
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            phone: phone.trim(),
+            password,
+            gender: gender || null,
+            date_of_birth: dob || null,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          setErrors({ form: data.message || "Registration failed. Please try again." });
+          setLoading(false);
+          return;
+        }
+
+        setSuccessMsg("✓ Registration successful! Welcome to BharatBazar.");
+        await refreshUser();
+        setTimeout(() => {
+          setPage("home");
+        }, 700);
+      } catch (err: any) {
+        console.error("Registration error:", err);
+        setErrors({ form: err?.message || "Network error. Please try again." });
+        setLoading(false);
+      }
     }
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setStep(s => s + 1); }, 800);
+  };
+
+  const handleGoogleSuccess = async (googleUser: any) => {
+    setErrors({});
+    setSuccessMsg(`✓ Welcome, ${googleUser.name}! Account registered & verified via Google.`);
+    await refreshUser();
+    setTimeout(() => {
+      setPage("home");
+    }, 700);
+  };
+
+  const handleGoogleError = (err: string) => {
+    setErrors({ form: err });
   };
 
   const strength =
@@ -168,7 +292,7 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
 
         {/* Bottom */}
         <div className="relative z-10">
-          <p className="text-white/30 text-[10px]">🔒 Your data is encrypted and secure</p>
+          <p className="text-white/50 text-xs">🔒 256-Bit SSL Encrypted &amp; Secure Account</p>
         </div>
       </div>
 
@@ -187,11 +311,22 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
           </div>
         </div>
 
-        <div className="flex-1 flex items-start md:items-center justify-center px-5 py-8 md:px-16">
+        {/* Recent OTPs Banner Trigger */}
+        <div className="px-5 pt-4 md:px-16 flex justify-end">
+          <button
+            onClick={() => setShowOtpModal(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border border-[#009966]/30 bg-[#009966]/10 text-[#009966] hover:bg-[#009966]/20 transition-colors shadow-sm"
+          >
+            <Database size={13} />
+            <span>View Recent OTPs</span>
+          </button>
+        </div>
+
+        <div className="flex-1 flex items-start md:items-center justify-center px-5 py-6 md:px-16">
           <div className="w-full max-w-sm">
 
             {/* Step indicator */}
-            <div className="flex items-center gap-2 mb-8">
+            <div className="flex items-center gap-2 mb-6">
               {STEPS.map((s, i) => (
                 <div key={i} className="flex items-center gap-2 flex-1">
                   <div className="flex flex-col items-center gap-1.5">
@@ -218,6 +353,22 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
               ))}
             </div>
 
+            {/* Form Error or Success Banner */}
+            {errors.form && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-semibold">
+                {errors.form}
+              </motion.div>
+            )}
+
+            {successMsg && (
+              <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 size={16} className="shrink-0" />
+                <span>{successMsg}</span>
+              </motion.div>
+            )}
+
             <AnimatePresence mode="wait">
 
               {/* ── STEP 0: Personal Info ── */}
@@ -227,9 +378,23 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                   transition={{ duration: 0.25 }}
                   className="space-y-4"
                 >
-                  <div className="mb-6">
+                  <div className="mb-4">
                     <h2 className="text-2xl font-black text-foreground mb-1">Create account 🎉</h2>
-                    <p className="text-muted-foreground text-sm">Fill in your details to get started</p>
+                    <p className="text-muted-foreground text-sm">Fill in your details or register with Google</p>
+                  </div>
+
+                  {/* Google 1-Click Register */}
+                  <div className="pb-2">
+                    <GoogleSignInButton
+                      buttonText="Quick Register with Google"
+                      onSuccess={handleGoogleSuccess}
+                      onError={handleGoogleError}
+                    />
+                    <div className="flex items-center gap-3 my-4">
+                      <div className="flex-1 h-px bg-border" />
+                      <span className="text-[10px] text-muted-foreground font-semibold">OR REGISTER MANUALLY</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
                   </div>
 
                   <div>
@@ -269,8 +434,8 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                     <label className={label}>Gender <span className="text-muted-foreground font-normal">(optional)</span></label>
                     <div className="flex gap-2">
                       {["Male", "Female", "Other"].map(g => (
-                        <button key={g} onClick={() => setGender(gender === g ? "" : g)}
-                          className="flex-1 py-2.5 rounded-lg border text-xs font-bold transition-all"
+                        <button key={g} type="button" onClick={() => setGender(gender === g ? "" : g)}
+                          className="flex-1 py-2 rounded-lg border text-xs font-bold transition-all"
                           style={{
                             background: gender === g ? G : "transparent",
                             borderColor: gender === g ? G : "var(--border)",
@@ -297,15 +462,42 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                   className="space-y-5"
                 >
                   <div className="text-center">
-                    <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3"
                       style={{ background: `${G}15` }}>
-                      <Smartphone size={28} style={{ color: G }} />
+                      <Smartphone size={26} style={{ color: G }} />
                     </div>
                     <h2 className="text-2xl font-black text-foreground mb-1">Verify your mobile</h2>
                     <p className="text-muted-foreground text-sm">
-                      OTP sent to <span className="font-bold text-foreground">+91 {phone}</span>
+                      OTP for <span className="font-bold text-foreground">+91 {phone}</span>
                     </p>
                   </div>
+
+                  {/* OTP Notification Card with Neon DB Code */}
+                  {latestOtp && (
+                    <motion.div
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-between shadow-sm"
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-0.5">
+                          <Database size={12} /> Registration Code
+                        </div>
+                        <p className="text-2xl font-black font-mono tracking-widest text-[#009966]">
+                          {latestOtp}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => fillOtp(latestOtp)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-black text-white shadow-sm hover:opacity-90 transition-opacity"
+                        style={{ background: G }}
+                      >
+                        Auto-Fill
+                      </button>
+                    </motion.div>
+                  )}
 
                   <div className="flex gap-2 xs:gap-2.5 justify-center w-full max-w-xs mx-auto">
                     {otp.map((d, i) => (
@@ -324,17 +516,35 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                     ))}
                   </div>
 
-                  <p className="text-center text-xs text-muted-foreground">
-                    Didn't receive?{" "}
-                    <button className="font-bold hover:underline" style={{ color: G }}>Resend OTP</button>
-                  </p>
+                  <div className="flex items-center justify-between text-xs px-1">
+                    <p className="text-muted-foreground">
+                      Didn't receive?{" "}
+                      <button
+                        type="button"
+                        onClick={() => sendRegistrationOtp(phone)}
+                        className="font-bold hover:underline"
+                        style={{ color: G }}
+                      >
+                        Resend OTP
+                      </button>
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowOtpModal(true)}
+                      className="font-bold flex items-center gap-1 hover:underline text-xs"
+                      style={{ color: G }}
+                    >
+                      <KeyRound size={12} /> View OTPs
+                    </button>
+                  </div>
 
                   {/* Info card */}
                   <div className="flex items-start gap-3 p-3.5 rounded-xl border"
                     style={{ background: `${G}0a`, borderColor: `${G}25` }}>
                     <ShieldCheck size={16} style={{ color: G }} className="shrink-0 mt-0.5" />
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      We use your mobile number to protect your account and send order updates.
+                      OTP is securely validated against your registration request before proceeding.
                     </p>
                   </div>
                 </motion.div>
@@ -349,7 +559,7 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                 >
                   <div className="mb-6">
                     <h2 className="text-2xl font-black text-foreground mb-1">Set your password 🔒</h2>
-                    <p className="text-muted-foreground text-sm">Create a strong password to secure your account</p>
+                    <p className="text-muted-foreground text-sm">Create a secure password for <span className="font-bold text-foreground">{email}</span></p>
                   </div>
 
                   {/* Password */}
@@ -358,9 +568,9 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                     <div className="relative">
                       <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                       <input value={password} onChange={e => setPassword(e.target.value)}
-                        type={showPass ? "text" : "password"} placeholder="Min. 8 characters"
+                        type={showPass ? "text" : "password"} placeholder="Min. 6 characters"
                         className={`${inp} pl-10 pr-12`} />
-                      <button onClick={() => setShowPass(v => !v)}
+                      <button type="button" onClick={() => setShowPass(v => !v)}
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                         {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
@@ -392,7 +602,7 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                       <input value={confirm} onChange={e => setConfirm(e.target.value)}
                         type={showConfirm ? "text" : "password"} placeholder="Re-enter password"
                         className={`${inp} pl-10 pr-12`} />
-                      <button onClick={() => setShowConfirm(v => !v)}
+                      <button type="button" onClick={() => setShowConfirm(v => !v)}
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
                         {showConfirm ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
@@ -406,6 +616,7 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                         <CheckCircle size={11} /> Passwords match
                       </motion.p>
                     )}
+                    {errors.confirm && <p className="text-red-500 text-[11px] mt-1 font-semibold">{errors.confirm}</p>}
                   </div>
 
                   {/* Cashback banner */}
@@ -417,13 +628,13 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                     </div>
                     <div>
                       <p className="text-sm font-black" style={{ color: G }}>₹200 Cashback Unlocked!</p>
-                      <p className="text-[11px] text-muted-foreground">Applied automatically on your first order</p>
+                      <p className="text-[11px] text-muted-foreground">Automatically verified &amp; credited on your registration</p>
                     </div>
                   </div>
 
                   {/* Terms */}
                   <label className="flex items-start gap-3 cursor-pointer select-none">
-                    <button onClick={() => setAgreed(v => !v)}
+                    <button type="button" onClick={() => setAgreed(v => !v)}
                       className="w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all"
                       style={{
                         background: agreed ? G : "transparent",
@@ -453,15 +664,18 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
                 </motion.button>
               )}
               <motion.button whileTap={{ scale: 0.97 }} onClick={nextStep} disabled={loading}
-                className="flex-1 py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2"
+                className="flex-1 py-3.5 rounded-xl text-sm font-black text-white flex items-center justify-center gap-2 shadow-md"
                 style={{ background: `linear-gradient(to right, ${GD}, ${G})`, boxShadow: `0 4px 16px ${G}44` }}>
                 {loading ? (
                   <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.7, ease: "linear" }}
                     className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-                ) : step === 2
-                  ? <>Create Account 🎉</>
-                  : <>Continue <ArrowRight size={15} /></>
-                }
+                ) : step === 0 ? (
+                  <>Send OTP Code <ArrowRight size={15} /></>
+                ) : step === 1 ? (
+                  <>Verify OTP &amp; Continue <ArrowRight size={15} /></>
+                ) : (
+                  <>Create Account &amp; Verify 🎉</>
+                )}
               </motion.button>
             </div>
 
@@ -475,13 +689,20 @@ export function RegisterPage({ setPage }: { setPage: (p: Page) => void }) {
 
             {/* Bottom trust */}
             <div className="mt-6 pt-5 border-t border-border flex items-center justify-center gap-5 flex-wrap">
-              {["🔒 SSL Secured", "✅ 100% Safe", "🏆 Trusted by 5Cr+"].map(t => (
+              {["🔒 SSL Secured", "✅ 100% Safe & Verified", "🏆 Trusted by 5Cr+"].map(t => (
                 <span key={t} className="text-[10px] text-muted-foreground font-semibold">{t}</span>
               ))}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Live Neon DB OTP Modal */}
+      <OtpLiveViewerModal
+        isOpen={showOtpModal}
+        onClose={() => setShowOtpModal(false)}
+        onSelectOtp={fillOtp}
+      />
     </div>
   );
 }

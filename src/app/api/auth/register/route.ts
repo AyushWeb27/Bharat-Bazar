@@ -5,7 +5,7 @@ import { hashPassword, createUserSessionToken, USER_COOKIE_NAME } from "@/lib/au
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, password, phone } = body;
+    const { name, email, password, phone, gender, date_of_birth } = body;
 
     if (!name || !email || !password) {
       return NextResponse.json(
@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await hashPassword(password);
     const cleanPhone = phone ? String(phone).trim() : "";
+    const cleanGender = gender ? String(gender).trim() : null;
+    const cleanDob = date_of_birth ? String(date_of_birth).trim() : null;
 
     // Insert new user into Neon DB users table (verified in database on creation)
     const inserted = await sql`
@@ -67,6 +69,8 @@ export async function POST(req: NextRequest) {
         email,
         password_hash,
         phone,
+        gender,
+        date_of_birth,
         email_verified,
         auth_provider,
         status,
@@ -77,12 +81,14 @@ export async function POST(req: NextRequest) {
         ${cleanEmail},
         ${passwordHash},
         ${cleanPhone},
+        ${cleanGender},
+        ${cleanDob},
         TRUE,
         'local',
         'active',
         CURRENT_TIMESTAMP
       )
-      RETURNING id, name, email, phone, avatar_url, email_verified, auth_provider, created_at
+      RETURNING id, name, email, phone, gender, date_of_birth::TEXT AS date_of_birth, avatar_url, email_verified, auth_provider, created_at
     `;
 
     const user = inserted[0];
@@ -105,6 +111,8 @@ export async function POST(req: NextRequest) {
         name: user.name,
         email: user.email,
         phone: user.phone,
+        gender: user.gender || "",
+        date_of_birth: user.date_of_birth ? String(user.date_of_birth).slice(0, 10) : "",
         avatar_url: user.avatar_url,
         email_verified: user.email_verified,
         auth_provider: user.auth_provider,

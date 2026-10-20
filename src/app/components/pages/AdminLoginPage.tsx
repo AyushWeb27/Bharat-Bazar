@@ -52,7 +52,7 @@ export function AdminLoginPage({ setPage }: { setPage: (p: Page) => void }) {
         return;
       }
 
-      setSuccess("Authentication verified via Neon DB! Redirecting...");
+      setSuccess("Authentication verified! Redirecting...");
       setTimeout(() => {
         setLoading(false);
         setPage("admin");

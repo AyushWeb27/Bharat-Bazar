@@ -1,7 +1,20 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { Prod } from "../components/types/index";
+
+export interface CustomerUser {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  avatar_url?: string;
+  email_verified: boolean;
+  auth_provider: string;
+  gender?: string;
+  date_of_birth?: string;
+  created_at?: string;
+}
 
 interface AppCtxValue {
   dark: boolean;
@@ -14,6 +27,10 @@ interface AppCtxValue {
   toast: { show: boolean; name: string };
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  user: CustomerUser | null;
+  userLoading: boolean;
+  refreshUser: () => Promise<void>;
+  logoutUser: () => Promise<void>;
 }
 
 const AppCtx = createContext<AppCtxValue>(null!);
@@ -25,10 +42,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [wish, setWish] = useState<Set<number>>(new Set());
   const [toast, setToast] = useState({ show: false, name: "" });
   const [searchQuery, setSearchQuery] = useState("");
+  const [user, setUser] = useState<CustomerUser | null>(null);
+  const [userLoading, setUserLoading] = useState(true);
 
+  // Sync dark theme
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  // Load customer user session from Neon DB
+  const refreshUser = useCallback(async () => {
+    try {
+      setUserLoading(true);
+      const res = await fetch("/api/auth/me", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (res.ok && data.authenticated && data.user) {
+        setUser(data.user);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setUserLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUser();
+  }, [refreshUser]);
+
+  const logoutUser = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
+    setUser(null);
+  }, []);
 
   const setDark = (d: boolean) => setDarkVal(d);
 
@@ -59,6 +113,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         toast,
         searchQuery,
         setSearchQuery,
+        user,
+        userLoading,
+        refreshUser,
+        logoutUser,
       }}
     >
       {children}

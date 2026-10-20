@@ -22,7 +22,24 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    ```
    Open [http://localhost:3000](http://localhost:3000) to view the store in your browser.
 
-3. **Build for production**:
+3. **Create the admin group-categories table in Neon** (requires `DATABASE_URL` in `.env`):
+   ```bash
+   npm run db:group-categories
+   ```
+
+4. **Create and seed the admin categories table in Neon**:
+   ```bash
+   npm run db:categories
+   ```
+   Configure the S3-compatible Neon storage environment variables in `.env`, including `AWS_CATEGORY_IMAGES_BUCKET_NAME=category-images`, to enable category image uploads.
+
+5. **Create and seed the admin subcategories table in Neon**:
+   ```bash
+   npm run db:subcategories
+   ```
+   Configure `AWS_SUBCATEGORIES_IMAGES_BUCKET_NAME=subcategories-images` for subcategory image uploads.
+
+6. **Build for production**:
    ```bash
    npm run build
    npm run start
