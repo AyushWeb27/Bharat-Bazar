@@ -70,14 +70,14 @@ export const INIT_REQUESTS: ProdRequest[] = [
 ];
 
 export const INIT_TAXES: TaxRule[] = [
-  { id: 1, name: "GST Exempt",      slab: 0,  type: "GST",     category: "Essential Groceries",      products: 423,  active: true  },
-  { id: 2, name: "GST 5%",          slab: 5,  type: "GST",     category: "Food & Packaged Goods",    products: 1821, active: true  },
-  { id: 3, name: "GST 12%",         slab: 12, type: "GST",     category: "Books & Stationery",       products: 892,  active: true  },
-  { id: 4, name: "GST 18%",         slab: 18, type: "GST",     category: "Electronics & Apparel",    products: 8214, active: true  },
-  { id: 5, name: "GST 28%",         slab: 28, type: "GST",     category: "Luxury & Premium Goods",   products: 234,  active: true  },
-  { id: 6, name: "IGST 5%",         slab: 5,  type: "IGST",    category: "Inter-state Food Items",   products: 312,  active: true  },
-  { id: 7, name: "IGST 18%",        slab: 18, type: "IGST",    category: "Inter-state Electronics",  products: 1923, active: true  },
-  { id: 8, name: "Customs Duty 10%",slab: 10, type: "Customs", category: "Imported Goods",           products: 89,   active: false },
+  { id: 1, name: "GST Exempt",      slab: 0,  rateLabel: "0%",  type: "GST",     category: "Essential Groceries",      products: 423,  active: true  },
+  { id: 2, name: "GST 5%",          slab: 5,  rateLabel: "5%",  type: "GST",     category: "Food & Packaged Goods",    products: 1821, active: true  },
+  { id: 3, name: "GST 12%",         slab: 12, rateLabel: "12%", type: "GST",     category: "Books & Stationery",       products: 892,  active: true  },
+  { id: 4, name: "GST 18%",         slab: 18, rateLabel: "18%", type: "GST",     category: "Electronics & Apparel",    products: 8214, active: true  },
+  { id: 5, name: "GST 28%",         slab: 28, rateLabel: "28%", type: "GST",     category: "Luxury & Premium Goods",   products: 234,  active: true  },
+  { id: 6, name: "IGST 5%",         slab: 5,  rateLabel: "5%",  type: "IGST",    category: "Inter-state Food Items",   products: 312,  active: true  },
+  { id: 7, name: "IGST 18%",        slab: 18, rateLabel: "18%", type: "IGST",    category: "Inter-state Electronics",  products: 1923, active: true  },
+  { id: 8, name: "Customs Duty 10%",slab: 10, rateLabel: "10%", type: "Customs", category: "Imported Goods",           products: 89,   active: false },
 ];
 
 export const INIT_BRANDS: Brand[] = [

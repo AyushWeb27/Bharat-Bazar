@@ -11,6 +11,9 @@
     "db:group-categories": "node --env-file=.env scripts/setup-group-categories.mjs",
     "db:categories": "npm run db:group-categories && node --env-file=.env scripts/setup-categories.mjs",
     "db:subcategories": "npm run db:categories && node --env-file=.env scripts/setup-subcategories.mjs",
+    "db:brands": "node --env-file=.env scripts/setup-brands.mjs",
+    "db:products": "node --env-file=.env scripts/setup-products.mjs",
+    "db:taxes": "node --env-file=.env scripts/setup-taxes.mjs",
     "admin:add": "node --env-file=.env scripts/create-admin.mjs"
   },
   "dependencies": {

@@ -8,6 +8,7 @@ import {
   FileText, Info, Star, Eye, ShoppingBag, ListChecks,
 } from "lucide-react";
 import { INIT_CATS, INIT_SUBCATS, INIT_BRANDS } from "./shared/data";
+import type { TaxRule } from "./shared/types";
 import { G, GD, fmt, disc, inp } from "./shared/constants";
 import { Field, Toggle } from "./shared/ui";
 
@@ -86,6 +87,20 @@ const SPEC_TEMPLATES: Record<string, Array<{key: string; placeholder: string}>> 
     { key: "Warranty", placeholder: "e.g. 6 Months" },
   ],
 };
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function textValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberText(value: unknown, fallback = "") {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : fallback;
+}
 
 const SECTIONS = [
   { id: "section-01", num: "01", label: "Basic Info",    icon: Package     },
@@ -189,8 +204,13 @@ function UploadZone({
       className={`relative border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center cursor-pointer transition-all group hover:border-[#009966] hover:shadow-[0_0_0_4px_rgba(0,153,102,0.08)] overflow-hidden ${small ? "h-28" : "h-48"}`}
       onClick={() => ref.current?.click()}
     >
-      <input ref={ref} type="file" accept="image/*" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+        onClick={e => e.stopPropagation()}
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          e.target.value = "";
+        }} />
       {preview ? (
         <img src={preview} alt="preview" className="absolute inset-0 w-full h-full object-cover" />
       ) : (
@@ -216,7 +236,7 @@ function UploadZone({
 // ─────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────
-export function AddProductPage() {
+export function AddProductPage({ productId, onCancel }: { productId?: number; onCancel?: () => void }) {
   // ── Basic Info ──────────────────────────────
   const [name, setName]           = useState("");
   const [isPopular, setIsPopular] = useState(false);
@@ -227,8 +247,13 @@ export function AddProductPage() {
 
   // ── Media ───────────────────────────────────
   const [mainImg, setMainImg]     = useState<string>();
+  const [mainImageFile, setMainImageFile] = useState<File | null>(null);
   const [gallery, setGallery]     = useState<Array<string | undefined>>(Array(6).fill(undefined));
+  const [galleryFiles, setGalleryFiles] = useState<Array<File | undefined>>(Array(6).fill(undefined));
   const [videoUrl, setVideoUrl]   = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [existingVideoFileUrl, setExistingVideoFileUrl] = useState("");
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Organisation ────────────────────────────
   const [category, setCategory]   = useState("");
@@ -241,6 +266,10 @@ export function AddProductPage() {
   const [mrp, setMrp]             = useState("");
   const [selling, setSelling]     = useState("");
   const [cost, setCost]           = useState("");
+  const [taxRules, setTaxRules] = useState<TaxRule[]>([]);
+  const [taxRulesLoading, setTaxRulesLoading] = useState(true);
+  const [taxRulesError, setTaxRulesError] = useState("");
+  const [taxRuleId, setTaxRuleId] = useState("");
 
   // ── Inventory ───────────────────────────────
   const [stock, setStock]         = useState("");
@@ -288,7 +317,6 @@ export function AddProductPage() {
   const [warrantyType, setWarrantyType] = useState("Manufacturer");
   const [fssai, setFssai]         = useState("");
   const [maxCart, setMaxCart]     = useState("");
-  const [taxIncluded, setTaxIncluded] = useState(false);
   const [returnable, setReturnable] = useState(true);
   const [returnDays, setReturnDays] = useState("7");
 
@@ -299,8 +327,13 @@ export function AddProductPage() {
 
   // ── Status / publish ────────────────────────
   const [active, setActive]       = useState(true);
+  const [storedStatus, setStoredStatus] = useState<"draft" | "active" | "inactive">("draft");
   const [featured, setFeatured]   = useState(false);
   const [published, setPublished] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadingProduct, setLoadingProduct] = useState(Boolean(productId));
+  const [productLoaded, setProductLoaded] = useState(!productId);
+  const [formMessage, setFormMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // ── Scroll spy ──────────────────────────────
   const [activeSection, setActiveSection] = useState("section-01");
@@ -328,6 +361,152 @@ export function AddProductPage() {
     return () => observerRef.current?.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!productId) return;
+    const controller = new AbortController();
+    async function loadProduct() {
+      setLoadingProduct(true);
+      setFormMessage(null);
+      try {
+        const response = await fetch(`/api/admin/products?id=${productId}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !result.product || typeof result.product !== "object") {
+          throw new Error(result.message || "Could not load this product for editing.");
+        }
+        const product = recordValue(result.product);
+        const details = recordValue(product.details);
+        const shipping = recordValue(details.shipping);
+        const dimensions = recordValue(shipping.dimensions);
+        const seo = recordValue(details.seo);
+        const rawVariants = Array.isArray(details.variants) ? details.variants : [];
+        const rawSpecifications = Array.isArray(details.specifications) ? details.specifications : [];
+        const rawGallery = Array.isArray(product.galleryImages) ? product.galleryImages : [];
+        setName(textValue(product.name));
+        setShortDesc(textValue(product.shortDescription));
+        setFullDesc(textValue(product.fullDescription));
+        setIsPopular(Boolean(product.isPopular ?? details.isPopular));
+        setIsDeal(Boolean(product.isDeal ?? details.isDeal));
+        setHighlights(Array.isArray(details.highlights) ? details.highlights.filter((item): item is string => typeof item === "string") : []);
+        setTags(Array.isArray(details.tags) ? details.tags.filter((item): item is string => typeof item === "string") : []);
+        setMainImg(textValue(product.imageUrl) || undefined);
+        setMainImageFile(null);
+        setGallery(Array.from({ length: 6 }, (_, index) => typeof rawGallery[index] === "string" ? rawGallery[index] as string : undefined));
+        setGalleryFiles(Array(6).fill(undefined));
+        setVideoUrl(textValue(product.videoUrl));
+        setExistingVideoFileUrl(textValue(product.videoFileUrl));
+        setVideoFile(null);
+        setCategory(textValue(product.cat));
+        setSubcat(textValue(product.subcat));
+        setBrand(textValue(product.brand));
+        setSellerIds(Array.isArray(details.sellerIds) ? details.sellerIds.filter((id): id is number => typeof id === "number") : []);
+        setMrp(numberText(product.mrp));
+        setSelling(numberText(product.price));
+        setCost(numberText(product.costPrice));
+        setTaxRuleId(product.taxRuleId === null || product.taxRuleId === undefined ? "" : String(product.taxRuleId));
+        setStock(numberText(product.stock));
+        setLowAlert(numberText(product.lowStockAlert));
+        setSku(textValue(product.sku));
+        setBarcode(textValue(product.barcode));
+        setMoq(numberText(details.moq));
+        setCondition(textValue(details.condition, "New"));
+        const variants = rawVariants.map((value, index) => {
+          const variant = recordValue(value);
+          return {
+            id: typeof variant.id === "number" ? variant.id : index + 1,
+            variationType: textValue(variant.variationType),
+            title: textValue(variant.title),
+            price: textValue(variant.price),
+            offerPrice: textValue(variant.offerPrice),
+            stock: textValue(variant.stock),
+            status: variant.status === "Inactive" ? "Inactive" as const : "Active" as const,
+            images: [],
+          };
+        });
+        setVariants(variants);
+        setVCount(variants.length);
+        setHasVariants(Boolean(details.hasVariants));
+        setWeight(numberText(shipping.weight));
+        setDimL(numberText(dimensions.length));
+        setDimW(numberText(dimensions.width));
+        setDimH(numberText(dimensions.height));
+        setDelivery(textValue(shipping.delivery, "3-5"));
+        setFreeShip(Boolean(shipping.freeShip));
+        setCod(shipping.cod !== false);
+        setSeoTitle(textValue(seo.title));
+        setSeoKw(textValue(seo.keywords));
+        setSeoAlt(textValue(seo.alt));
+        setSeoMeta(textValue(seo.metaDescription));
+        setManufacturer(textValue(details.manufacturer));
+        setMadeIn(textValue(details.madeIn, "India"));
+        setHsn(textValue(details.hsn));
+        setWarranty(textValue(details.warranty));
+        setWarrantyType(textValue(details.warrantyType, "Manufacturer"));
+        setFssai(textValue(details.fssai));
+        setMaxCart(numberText(details.maxCart));
+        setReturnable(details.returnable !== false);
+        setReturnDays(numberText(details.returnDays, "7"));
+        const specifications = rawSpecifications.map((value, index) => {
+          const specification = recordValue(value);
+          return {
+            id: index + 1,
+            key: textValue(specification.key),
+            value: textValue(specification.value),
+          };
+        });
+        setSpecs(specifications);
+        setSpecCount(specifications.length);
+        const status = product.storedStatus === "active" || product.storedStatus === "inactive" || product.storedStatus === "draft"
+          ? product.storedStatus
+          : "draft";
+        setStoredStatus(status);
+        setActive(status === "active");
+        setFeatured(Boolean(product.featured));
+        setProductLoaded(true);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setFormMessage({
+            type: "error",
+            text: error instanceof Error ? error.message : "Could not load this product for editing.",
+          });
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoadingProduct(false);
+      }
+    }
+    void loadProduct();
+    return () => controller.abort();
+  }, [productId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadTaxRules() {
+      setTaxRulesLoading(true);
+      setTaxRulesError("");
+      try {
+        const response = await fetch("/api/admin/taxes", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !Array.isArray(result.taxes)) {
+          throw new Error(result.message || "Failed to load tax rules.");
+        }
+        setTaxRules(result.taxes);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setTaxRulesError(error instanceof Error ? error.message : "Failed to load tax rules.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setTaxRulesLoading(false);
+      }
+    }
+    void loadTaxRules();
+    return () => controller.abort();
+  }, []);
+
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -337,6 +516,15 @@ export function AddProductPage() {
   const sellN   = parseFloat(selling) || 0;
   const discPct = disc(mrpN, sellN);
   const saving  = mrpN - sellN;
+  const applicableTaxRules = taxRules.filter(
+    rule => (rule.active || String(rule.id) === taxRuleId) &&
+      (rule.slab !== null || String(rule.id) === taxRuleId)
+  );
+  const selectedTaxRule = applicableTaxRules.find(rule => String(rule.id) === taxRuleId);
+  const taxAmount = selectedTaxRule && selectedTaxRule.slab !== null
+    ? Math.round((sellN * selectedTaxRule.slab / 100 + Number.EPSILON) * 100) / 100
+    : 0;
+  const priceWithTax = Math.round((sellN + taxAmount + Number.EPSILON) * 100) / 100;
 
   const filteredSubcats = INIT_SUBCATS.filter(s => s.parent === category);
 
@@ -377,11 +565,108 @@ export function AddProductPage() {
       n[i] = url;
       return n;
     });
+    setGalleryFiles(prev => {
+      const n = [...prev];
+      n[i] = f;
+      return n;
+    });
   };
 
-  const handlePublish = () => {
-    setPublished(true);
-    setTimeout(() => setPublished(false), 3000);
+  const saveProduct = async (publish: boolean) => {
+    setIsSaving(true);
+    setFormMessage(null);
+    const details = {
+      highlights, tags, sellerIds, isPopular, isDeal,
+      moq: moq === "" ? null : Number(moq),
+      condition, hasVariants,
+      variants: variants.map(variant => ({
+        id: variant.id,
+        variationType: variant.variationType,
+        title: variant.title,
+        price: variant.price,
+        offerPrice: variant.offerPrice,
+        stock: variant.stock,
+        status: variant.status,
+      })),
+      shipping: {
+        weight: weight === "" ? null : Number(weight),
+        dimensions: {
+          length: dimL === "" ? null : Number(dimL),
+          width: dimW === "" ? null : Number(dimW),
+          height: dimH === "" ? null : Number(dimH),
+        },
+        delivery, freeShip, cod,
+      },
+      seo: { title: seoTitle, keywords: seoKw, alt: seoAlt, metaDescription: seoMeta },
+      manufacturer, madeIn, hsn, warranty, warrantyType, fssai,
+      maxCart: maxCart === "" ? null : Number(maxCart),
+      returnable, returnDays: returnable ? Number(returnDays) : null,
+      specifications: specs
+        .filter(spec => spec.key.trim() || spec.value.trim())
+        .map(({ key, value }) => ({ key: key.trim(), value: value.trim() })),
+    };
+    const saveStatus: "draft" | "active" | "inactive" = productId
+      ? publish
+        ? active ? "active" : "inactive"
+        : storedStatus === "draft" ? "draft" : active ? "active" : "inactive"
+      : publish ? active ? "active" : "inactive" : "draft";
+    const payload = {
+      ...(productId ? { id: productId } : {}),
+      name,
+      shortDescription: shortDesc,
+      fullDescription: fullDesc,
+      category,
+      subcategory: subcat,
+      brand,
+      mrp: mrp === "" ? null : Number(mrp),
+      sellingPrice: selling === "" ? null : Number(selling),
+      costPrice: cost === "" ? null : Number(cost),
+      stock: stock === "" ? "" : Number(stock),
+      lowStockAlert: lowAlert === "" ? null : Number(lowAlert),
+      sku,
+      barcode,
+      videoUrl,
+      isPopular,
+      isDeal,
+      featured,
+      status: saveStatus,
+      taxRuleId: taxRuleId ? Number(taxRuleId) : null,
+      details,
+    };
+    const formData = new FormData();
+    formData.append("product", JSON.stringify(payload));
+    if (mainImageFile) formData.append("mainImage", mainImageFile);
+    galleryFiles.forEach((file, index) => {
+      if (file) formData.append(`galleryImage_${index}`, file);
+    });
+    if (videoFile) formData.append("video", videoFile);
+
+    try {
+      const response = await fetch("/api/admin/products", {
+        method: productId ? "PUT" : "POST",
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(typeof result.message === "string" ? result.message : "Could not save the product.");
+      }
+      setPublished(publish);
+      setStoredStatus(payload.status);
+      setFormMessage({
+        type: "success",
+        text: productId
+          ? "Product updated successfully."
+          : publish ? "Product published successfully." : "Product draft saved successfully.",
+      });
+      if (publish) window.setTimeout(() => setPublished(false), 3000);
+    } catch (error) {
+      setFormMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Could not save the product. Please try again.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const addSpec = (key = "", value = "") => {
@@ -418,12 +703,18 @@ export function AddProductPage() {
                 BharatBazar · Super Admin
               </p>
               <p className="text-sm font-black text-gray-900 truncate font-['Plus_Jakarta_Sans']">
-                {name.trim() || <span className="text-gray-400 font-normal">New Product</span>}
+                {name.trim() || <span className="text-gray-400 font-normal">{productId ? "Edit Product" : "New Product"}</span>}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {onCancel && (
+              <button type="button" onClick={onCancel} disabled={isSaving}
+                className="px-3 py-2 rounded-xl border border-gray-300 text-xs font-black text-gray-700 hover:bg-gray-50 transition-all">
+                Back to Products
+              </button>
+            )}
             {/* condition pill */}
             <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-100 text-gray-600">
               <span className="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block" />
@@ -431,14 +722,19 @@ export function AddProductPage() {
             </span>
 
             <button
+              type="button"
+              onClick={() => saveProduct(false)}
+              disabled={isSaving || loadingProduct || !productLoaded}
               className="px-3.5 py-2 rounded-xl border border-gray-300 text-xs font-black text-gray-700 hover:bg-gray-50 transition-all"
             >
-              Save Draft
+              {isSaving ? "Saving…" : productId ? "Save Changes" : "Save Draft"}
             </button>
 
             <motion.button
+              type="button"
               whileTap={{ scale: 0.97 }}
-              onClick={handlePublish}
+              onClick={() => saveProduct(true)}
+              disabled={isSaving || loadingProduct || !productLoaded}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white shadow-sm transition-all hover:opacity-90"
               style={{ background: `linear-gradient(135deg, ${G} 0%, ${GD} 100%)` }}
             >
@@ -449,7 +745,7 @@ export function AddProductPage() {
                   </motion.span>
                 ) : (
                   <motion.span key="pub" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-1.5">
-                    <Eye size={13} /> Publish
+                    {isSaving ? "Saving…" : <><Eye size={13} /> {productId ? "Save & Publish" : "Publish"}</>}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -457,6 +753,29 @@ export function AddProductPage() {
           </div>
         </div>
       </div>
+
+      {loadingProduct && (
+        <div className="mx-auto max-w-4xl rounded-xl border border-gray-200 bg-white px-5 py-4 text-sm font-semibold text-gray-500">
+          Loading product details…
+        </div>
+      )}
+
+      {formMessage && (
+        <div
+          role={formMessage.type === "error" ? "alert" : "status"}
+          className={`max-w-[1600px] mx-auto px-4 sm:px-6 pt-4 text-sm font-semibold ${
+            formMessage.type === "error" ? "text-red-700" : "text-[#007a52]"
+          }`}
+        >
+          <div className={`rounded-xl px-4 py-3 border ${
+            formMessage.type === "error"
+              ? "border-red-200 bg-red-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}>
+            {formMessage.text}
+          </div>
+        </div>
+      )}
 
       {/* ── Three-column grid ── */}
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
@@ -595,7 +914,10 @@ export function AddProductPage() {
               <Field label="Main Image" required hint="Min. 800×800px recommended">
                 <UploadZone
                   preview={mainImg}
-                  onFile={f => setMainImg(URL.createObjectURL(f))}
+                  onFile={f => {
+                    setMainImageFile(f);
+                    setMainImg(URL.createObjectURL(f));
+                  }}
                   label="Drag & drop or click to upload main product image"
                 />
               </Field>
@@ -613,7 +935,7 @@ export function AddProductPage() {
                 </div>
               </Field>
 
-              <Field label="Product Video URL" hint="YouTube or Vimeo">
+              <Field label="Product Video URL" hint="YouTube, Vimeo, MP4, or WebM">
                 <div className="relative">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                     <Video size={14} />
@@ -625,6 +947,40 @@ export function AddProductPage() {
                     className={`${inp} pl-9`}
                   />
                 </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <input
+                    ref={videoInputRef}
+                    type="file"
+                    accept="video/mp4,video/webm"
+                    onChange={e => {
+                      setVideoFile(e.target.files?.[0] ?? null);
+                      e.target.value = "";
+                    }}
+                    className="block max-w-full text-xs text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-xs file:font-bold file:text-gray-700 hover:file:bg-gray-200"
+                  />
+                  {videoFile && (
+                    <span className="flex items-center gap-2 text-xs text-gray-600">
+                      {videoFile.name}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVideoFile(null);
+                          if (videoInputRef.current) videoInputRef.current.value = "";
+                        }}
+                        aria-label="Remove product video"
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <X size={14} />
+                      </button>
+                    </span>
+                  )}
+                </div>
+                {existingVideoFileUrl && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Existing product video will be kept unless you upload a replacement.
+                  </p>
+                )}
+                <p className="mt-1 text-[10px] text-gray-400">Uploaded videos are stored in the product media bucket (max 100 MB).</p>
               </Field>
             </SectionCard>
 
@@ -634,10 +990,15 @@ export function AddProductPage() {
                 <Field label="Category" required>
                   <select
                     value={category}
-                    onChange={e => { setCategory(e.target.value); setSubcat(""); }}
+                    onChange={e => {
+                      setCategory(e.target.value);
+                      setSubcat("");
+                      setTaxRuleId("");
+                    }}
                     className={inp}
                   >
                     <option value="">Select category…</option>
+                    {category && !INIT_CATS.some(item => item.name === category) && <option key={`current-${category}`} value={category}>{category}</option>}
                     {INIT_CATS.filter(c => c.active).map(c => (
                       <option key={c.id} value={c.name}>{c.emoji} {c.name}</option>
                     ))}
@@ -652,6 +1013,7 @@ export function AddProductPage() {
                     disabled={!category}
                   >
                     <option value="">Select sub-category…</option>
+                    {subcat && !filteredSubcats.some(item => item.name === subcat) && <option key={`current-${subcat}`} value={subcat}>{subcat}</option>}
                     {filteredSubcats.filter(s => s.active).map(s => (
                       <option key={s.id} value={s.name}>{s.name}</option>
                     ))}
@@ -665,6 +1027,7 @@ export function AddProductPage() {
                     className={inp}
                   >
                     <option value="">Select brand…</option>
+                    {brand && !INIT_BRANDS.some(item => item.name === brand) && <option key={`current-${brand}`} value={brand}>{brand}</option>}
                     {INIT_BRANDS.filter(b => b.active).map(b => (
                       <option key={b.id} value={b.name}>{b.name} {b.countryFlag}</option>
                     ))}
@@ -734,6 +1097,45 @@ export function AddProductPage() {
                   </div>
                 </Field>
               </div>
+
+              <Field label="Tax Rule" hint="Tax is added on top. Choose the correct tax scope for this product and sale.">
+                <select
+                  value={taxRuleId}
+                  onChange={e => setTaxRuleId(e.target.value)}
+                  className={inp}
+                  disabled={taxRulesLoading || !applicableTaxRules.length}
+                >
+                  <option value="">
+                    {taxRulesLoading ? "Loading tax rules…" : "No tax rule"}
+                  </option>
+                  {applicableTaxRules.map(rule => (
+                    <option key={rule.id} value={rule.id} disabled={!rule.active || rule.slab === null}>
+                      {rule.name} · {rule.rateLabel || `${rule.slab}%`} ({rule.type}; {rule.category})
+                    </option>
+                  ))}
+                </select>
+                {taxRulesError && <p role="alert" className="mt-1 text-xs text-red-600">{taxRulesError}</p>}
+                {!taxRulesLoading && !taxRulesError && taxRules.length > 0 && applicableTaxRules.length === 0 && (
+                  <p className="mt-1 text-xs text-amber-700">No active tax rules with configured rates are available.</p>
+                )}
+                {!taxRulesLoading && taxRules.some(rule => rule.active && rule.slab === null) && (
+                  <p className="mt-1 text-xs text-amber-700">Variable-rate rules are listed in Tax Rules but cannot be used until a numeric rate is configured.</p>
+                )}
+                {selectedTaxRule && (!selectedTaxRule.active || selectedTaxRule.slab === null) && (
+                  <p className="mt-1 text-xs text-red-600">This saved tax rule is inactive or has no configured numeric rate. Choose an active configured rule before saving.</p>
+                )}
+              </Field>
+
+              {selectedTaxRule && selectedTaxRule.active && selectedTaxRule.slab !== null && (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+                  <p className="mb-2 text-xs font-black text-emerald-900">Price calculation · {selectedTaxRule.name}</p>
+                  <div className="space-y-1.5 text-xs text-emerald-800">
+                    <div className="flex justify-between gap-3"><span>Selling price</span><span>{fmt(sellN)}</span></div>
+                    <div className="flex justify-between gap-3"><span>{selectedTaxRule.type} ({selectedTaxRule.rateLabel || `${selectedTaxRule.slab}%`})</span><span>+ {fmt(taxAmount)}</span></div>
+                    <div className="flex justify-between gap-3 border-t border-emerald-200 pt-1.5 font-black"><span>Price including tax</span><span>{fmt(priceWithTax)}</span></div>
+                  </div>
+                </div>
+              )}
 
               {/* Live discount badge */}
               <AnimatePresence>
@@ -1140,13 +1542,6 @@ export function AddProductPage() {
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="flex items-center justify-between p-4 rounded-xl border border-gray-200 bg-gray-50/60 hover:bg-white hover:border-[#009966]/30 transition-all">
                   <div>
-                    <p className="text-xs font-black text-gray-800">Tax Included in Price?</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Price shown is tax-inclusive</p>
-                  </div>
-                  <Toggle on={taxIncluded} onChange={() => setTaxIncluded(!taxIncluded)} />
-                </div>
-                <div className="flex items-center justify-between p-4 rounded-xl border border-gray-200 bg-gray-50/60 hover:bg-white hover:border-[#009966]/30 transition-all">
-                  <div>
                     <p className="text-xs font-black text-gray-800">Is Returnable?</p>
                     <p className="text-[10px] text-gray-400 mt-0.5">Allow buyers to return this product</p>
                   </div>
@@ -1336,13 +1731,18 @@ export function AddProductPage() {
 
                 <div className="space-y-2 pt-1">
                   <button
-                    className="w-full py-2.5 rounded-xl border-2 border-white/40 text-sm font-black text-white hover:bg-white/10 transition-all"
+                    type="button"
+                    disabled={isSaving || loadingProduct || !productLoaded}
+                    onClick={() => saveProduct(false)}
+                    className="w-full py-2.5 rounded-xl border-2 border-white/40 text-sm font-black text-white hover:bg-white/10 transition-all disabled:opacity-60"
                   >
-                    Save Draft
+                    {isSaving ? "Saving…" : productId ? "Save Changes" : "Save Draft"}
                   </button>
                   <motion.button
+                    type="button"
                     whileTap={{ scale: 0.97 }}
-                    onClick={handlePublish}
+                    onClick={() => saveProduct(true)}
+                    disabled={isSaving || loadingProduct || !productLoaded}
                     className="w-full py-2.5 rounded-xl bg-white text-sm font-black transition-all hover:bg-white/90 flex items-center justify-center gap-2"
                     style={{ color: GD }}
                   >
@@ -1353,7 +1753,7 @@ export function AddProductPage() {
                         </motion.span>
                       ) : (
                         <motion.span key="pub" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2">
-                          <Eye size={14} /> Publish Product
+                          {isSaving ? "Saving…" : <><Eye size={14} /> {productId ? "Save & Publish" : "Publish Product"}</>}
                         </motion.span>
                       )}
                     </AnimatePresence>

@@ -13,7 +13,7 @@ import {
   Download, ChevronRight,
   PanelLeftClose, PanelLeftOpen, Layers, FolderOpen, GitBranch,
   Plus, Percent, PackagePlus, ClipboardList,
-  Eye, Award, Globe, ShieldCheck,
+  Eye, Award, Globe, ShieldCheck, Pencil,
   Home, Heart, LogIn, UserPlus, LayoutTemplate,
   AlertTriangle, XCircle, MapPin, Clock,
   Truck, Ticket, Bike, Phone, Star,
@@ -25,6 +25,7 @@ import {
 
 import { AddProductPage }      from "./admin/AddProductPage";
 import { ProductListPage }     from "./admin/ProductListPage";
+import { ProductEditPage }    from "./admin/ProductEditPage";
 import { ProductRequestsPage } from "./admin/ProductRequestsPage";
 import { TaxesPage }           from "./admin/TaxesPage";
 import { CategoriesPage }      from "./admin/CategoriesPage";
@@ -82,6 +83,7 @@ const NAV_MAIN = [
 const NAV_PRODUCTS_NAV = [
   { id: "add-product",     icon: PackagePlus,   label: "Add New Product"                          },
   { id: "product-list",    icon: Package,       label: "All Products",     badge: "28,394"        },
+  { id: "edit-product",    icon: Pencil,        label: "Edit Product"                              },
   { id: "prod-requests",   icon: ClipboardList, label: "Product Requests", badge: "4", badgeRed: true },
   { id: "product-reviews", icon: Star,          label: "Product Reviews",  badge: "18", badgeRed: true },
   { id: "taxes",           icon: Percent,       label: "Taxes"                                    },
@@ -673,6 +675,7 @@ function SidebarInner({ activeNav, setActiveNav, collapsed, setCollapsed, closeM
 
 export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) => void; currentAdmin?: any }) {
   const [activeNav,         setActiveNav        ] = useState("dashboard");
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [adminState,        setAdminState       ] = useState(currentAdmin);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarCollapsed,  setSidebarCollapsed ] = useState(false);
@@ -715,7 +718,11 @@ export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) =
   const closeDropdowns = () => { setNotifOpen(false); setProfileOpen(false); };
 
   const sidebarW = sidebarCollapsed ? 64 : 240;
-  const sidebarProps = { activeNav, setActiveNav, collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed, closeMobile: () => setMobileSidebarOpen(false), setPage, currentAdmin: adminState, onLogout: handleLogout };
+  const navigateAdmin = (id: string) => {
+    if (id !== "edit-product") setEditingProductId(null);
+    setActiveNav(id);
+  };
+  const sidebarProps = { activeNav, setActiveNav: navigateAdmin, collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed, closeMobile: () => setMobileSidebarOpen(false), setPage, currentAdmin: adminState, onLogout: handleLogout };
 
   function renderPage() {
     switch (activeNav) {
@@ -736,7 +743,10 @@ export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) =
       case "email-templates":      return <EmailTemplatePage />;
       case "shipping":             return <ShippingPage />;
       case "add-product":      return <AddProductPage />;
-      case "product-list":     return <ProductListPage />;
+      case "product-list":     return <ProductListPage onEdit={id => { setEditingProductId(id); setActiveNav("edit-product"); }} />;
+      case "edit-product":     return editingProductId
+        ? <AddProductPage productId={editingProductId} onCancel={() => { setEditingProductId(null); setActiveNav("edit-product"); }} />
+        : <ProductEditPage onEdit={setEditingProductId} />;
       case "product-reviews":  return <ProductReviewPage />;
       case "product-detail":   return <ProductDetailPage />;
       case "prod-requests":   return <ProductRequestsPage />;

@@ -39,7 +39,25 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    ```
    Configure `AWS_SUBCATEGORIES_IMAGES_BUCKET_NAME=subcategories-images` for subcategory image uploads.
 
-6. **Build for production**:
+6. **Create and seed the admin brands table in Neon**:
+   ```bash
+   npm run db:brands
+   ```
+   Configure the S3-compatible Neon storage environment variables in `.env`, including `AWS_BRANDS_IMAGES_BUCKET_NAME=brands-images`, to enable brand logo uploads.
+
+7. **Create the admin products table in Neon**:
+   ```bash
+   npm run db:products
+   ```
+   Main and gallery product images, plus uploaded MP4/WebM videos, use the S3-compatible Neon storage bucket configured by `AWS_PRODUCTS_MEDIA_BUCKET_NAME=product-main-image-video`.
+
+8. **Create the admin tax rules table and product tax columns in Neon**:
+   ```bash
+   npm run db:taxes
+   ```
+   Run this after `npm run db:products`. The setup seeds the supplied GST, CGST, SGST, UTGST, IGST, and Compensation Cess rules. Variable-rate rules retain their descriptive rate label and stay unavailable for product calculations until a numeric rate is configured. Product selling prices are stored before tax, with the selected active tax rule rate and the calculated tax-inclusive price stored separately. Tax category/scope labels describe tax applicability; admins must choose the correct rule for the sale.
+
+9. **Build for production**:
    ```bash
    npm run build
    npm run start

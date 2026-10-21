@@ -19,6 +19,7 @@ export const orderStatusMeta: Record<string, { color: string; bg: string; icon: 
 export const prodStatusMeta: Record<string, { label: string; color: string; bg: string }> = {
   active:       { label: "Active",       color: G,         bg: `${G}15`                  },
   inactive:     { label: "Inactive",     color: "#6b7280", bg: "rgba(107,114,128,0.1)"   },
+  draft:        { label: "Draft",        color: "#6b7280", bg: "rgba(107,114,128,0.1)"   },
   out_of_stock: { label: "Out of Stock", color: "#ef4444", bg: "rgba(239,68,68,0.1)"     },
   low_stock:    { label: "Low Stock",    color: "#f59e0b", bg: "rgba(245,158,11,0.1)"    },
 };
@@ -30,9 +31,14 @@ export const reqStatusMeta: Record<string, { label: string; color: string; bg: s
 };
 
 export const taxTypeMeta: Record<string, { color: string; bg: string }> = {
-  GST:     { color: G,         bg: `${G}12`                    },
-  IGST:    { color: "#3b82f6", bg: "rgba(59,130,246,0.1)"      },
-  Customs: { color: "#f59e0b", bg: "rgba(245,158,11,0.1)"      },
+  GST:                   { color: G,         bg: `${G}12`                    },
+  IGST:                  { color: "#3b82f6", bg: "rgba(59,130,246,0.1)"      },
+  Customs:               { color: "#f59e0b", bg: "rgba(245,158,11,0.1)"      },
+  "Central Tax":         { color: "#8b5cf6", bg: "rgba(139,92,246,0.1)"      },
+  "State Tax":           { color: "#ec4899", bg: "rgba(236,72,153,0.1)"      },
+  "Union Territory Tax": { color: "#06b6d4", bg: "rgba(6,182,212,0.1)"       },
+  "Integrated Tax":      { color: "#3b82f6", bg: "rgba(59,130,246,0.1)"      },
+  Cess:                  { color: "#f59e0b", bg: "rgba(245,158,11,0.1)"      },
 };
 
 export const GROUP_COLORS = ["#3b82f6","#ec4899","#f59e0b","#10b981","#8b5cf6","#f97316",G,"#ef4444","#06b6d4","#84cc16"];

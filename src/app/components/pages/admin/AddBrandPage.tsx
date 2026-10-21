@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Award, CheckCircle2, Globe, ImageIcon, Layers,
   Settings, Upload, Trash2, BadgeCheck, Star,
 } from "lucide-react";
-import { INIT_CATS } from "./shared/data";
 import { G, toSlug, inp, card } from "./shared/constants";
 import { SectionCard, Field, PageHeader, Toggle } from "./shared/ui";
+
+type CategoryOption = { id: number; name: string; emoji: string };
 
 function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: string; logoInit: string; logoUrl?: string; size?: number }) {
   if (logoUrl) {
@@ -28,7 +29,10 @@ function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: str
 export function AddBrandPage() {
   const [name,     setName    ] = useState("");
   const [slug,     setSlug    ] = useState("");
-  const [category, setCategory] = useState(INIT_CATS[0].name);
+  const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoryError, setCategoryError] = useState("");
   const [logoColor,setLogoColor] = useState(G);
   const [country,  setCountry ] = useState("India");
   const [countryFlag, setCountryFlag] = useState("🇮🇳");
@@ -38,13 +42,94 @@ export function AddBrandPage() {
   const [premium,  setPremium ] = useState(false);
   const [active,   setActive  ] = useState(true);
   const [logoUrl,  setLogoUrl ] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saved,    setSaved   ] = useState(false);
+  const [saving,   setSaving  ] = useState(false);
+  const [error,    setError   ] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadCategories() {
+      setCategoriesLoading(true);
+      setCategoryError("");
+      try {
+        const response = await fetch("/api/admin/categories", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !Array.isArray(result.categories)) {
+          throw new Error(result.message || "Failed to load categories.");
+        }
+        const options = result.categories.filter(
+          (item: unknown): item is CategoryOption =>
+            Boolean(item && typeof item === "object" &&
+              "id" in item && typeof item.id === "number" &&
+              "name" in item && typeof item.name === "string" &&
+              "emoji" in item && typeof item.emoji === "string")
+        );
+        setCategories(options);
+        setCategory(current => current || options[0]?.name || "");
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setCategoryError(loadError instanceof Error ? loadError.message : "Failed to load categories.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setCategoriesLoading(false);
+      }
+    }
+    void loadCategories();
+    return () => controller.abort();
+  }, []);
 
   const logoInit = name ? name.split(" ").map(w=>w[0]).join("").slice(0,2) : "?";
   const LOGO_COLORS = ["#111111","#1428a0","#eb0029","#e91e8c","#8B4513","#722f37","#2d6a4f","#52b788","#0082c3","#c41e3a","#ff6600","#ef4444","#0052cc","#f59e0b",G,"#6366f1"];
   const COUNTRIES = [{flag:"🇮🇳",name:"India"},{flag:"🇺🇸",name:"USA"},{flag:"🇨🇳",name:"China"},{flag:"🇩🇪",name:"Germany"},{flag:"🇫🇷",name:"France"},{flag:"🇨🇭",name:"Switzerland"},{flag:"🇰🇷",name:"South Korea"},{flag:"🇬🇧",name:"UK"},{flag:"🇯🇵",name:"Japan"}];
 
-  function handleSave() { setSaved(true); setTimeout(()=>setSaved(false),2500); }
+  async function handleSave() {
+    setError("");
+    if (!name.trim() || !slug.trim() || !categories.some(item => item.name === category)) {
+      setError("Brand name, slug, and a database category are required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name, slug, category, logoColor, country, countryFlag, website, description: desc,
+          featured, active, premium,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Could not create brand.");
+      if (logoFile) {
+        const imageData = new FormData();
+        imageData.append("image", logoFile);
+        const imageResponse = await fetch(`/api/admin/brands/${result.brand.id}/image`, {
+          method: "POST",
+          body: imageData,
+        });
+        const imageResult = await imageResponse.json();
+        if (!imageResponse.ok || !imageResult.success) {
+          const rollback = await fetch(`/api/admin/brands?id=${result.brand.id}`, { method: "DELETE" });
+          if (!rollback.ok) {
+            throw new Error(`Brand was created, but its image could not be saved and the brand could not be removed: ${imageResult.message || "Upload failed."}`);
+          }
+          throw new Error(imageResult.message || "Brand image upload failed; the unsaved brand was removed.");
+        }
+        setLogoUrl(imageResult.logoUrl);
+        setLogoFile(null);
+      }
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save brand.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -69,12 +154,17 @@ export function AddBrandPage() {
           <SectionCard title="Brand Logo" icon={ImageIcon}>
             {/* Upload zone */}
             <label className="block cursor-pointer">
-              <input type="file" accept="image/*" className="hidden" onChange={e=>{
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e=>{
                 const file=e.target.files?.[0];
                 if(!file)return;
-                const reader=new FileReader();
-                reader.onload=ev=>setLogoUrl(ev.target?.result as string);
-                reader.readAsDataURL(file);
+                if (file.size > 2 * 1024 * 1024) {
+                  setError("Brand images must be smaller than 2 MB.");
+                  e.target.value="";
+                  return;
+                }
+                setLogoFile(file);
+                setLogoUrl(URL.createObjectURL(file));
+                setError("");
                 e.target.value="";
               }}/>
               {logoUrl ? (
@@ -93,14 +183,14 @@ export function AddBrandPage() {
                   </div>
                   <div>
                     <p className="text-sm font-bold text-gray-700">Click to upload logo</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">PNG, JPG, SVG, WebP · Max 2MB</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">PNG, JPG, WebP · Max 2MB</p>
                   </div>
                 </div>
               )}
             </label>
 
             {logoUrl && (
-              <button onClick={()=>setLogoUrl("")}
+              <button onClick={()=>{setLogoUrl("");setLogoFile(null);}}
                 className="w-full mt-2 py-2 rounded-xl border border-gray-200 text-xs font-bold text-red-400 hover:bg-red-50 hover:border-red-300 flex items-center justify-center gap-1.5 transition-all">
                 <Trash2 size={12}/> Remove Logo
               </button>
@@ -140,10 +230,20 @@ export function AddBrandPage() {
         {/* RIGHT */}
         <div className="w-full xl:w-72 shrink-0 space-y-4">
           <SectionCard title="Classification" icon={Layers}>
-            <Field label="Category">
-              <select value={category} onChange={e=>setCategory(e.target.value)} className={inp}>
-                {INIT_CATS.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
+            <Field label="Category" required>
+              <select
+                value={category}
+                onChange={e=>setCategory(e.target.value)}
+                className={inp}
+                disabled={categoriesLoading || categories.length === 0}
+              >
+                <option value="">{categoriesLoading ? "Loading categories…" : "Select a category…"}</option>
+                {categories.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
               </select>
+              {categoryError && <p role="alert" className="mt-1 text-xs text-red-600">{categoryError}</p>}
+              {!categoriesLoading && !categoryError && categories.length === 0 && (
+                <p className="mt-1 text-xs text-amber-700">No categories found in the database.</p>
+              )}
             </Field>
             <Field label="Country of Origin">
               <select value={country} onChange={e=>{const c=COUNTRIES.find(x=>x.name===e.target.value);setCountry(e.target.value);setCountryFlag(c?.flag??"🌐");}} className={inp}>
@@ -174,17 +274,18 @@ export function AddBrandPage() {
       </div>
 
       {/* Action bar */}
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
       <div className={`${card} px-5 py-4 flex items-center justify-between gap-4 sticky bottom-4`}>
         <p className="text-xs text-gray-400 hidden sm:block">Complete all required fields before publishing</p>
         <div className="flex gap-3 w-full sm:w-auto">
           <button className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">Save Draft</button>
-          <motion.button whileTap={{scale:0.97}} onClick={handleSave}
+          <motion.button whileTap={{scale:0.97}} onClick={handleSave} disabled={saving}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black text-white transition-all"
-            style={{background: saved ? "#10b981" : G}}>
+            style={{background: saved ? "#10b981" : G,opacity:saving?0.7:1}}>
             <AnimatePresence mode="wait">
               {saved
                 ? <motion.span key="done" initial={{opacity:0,scale:0.8}} animate={{opacity:1,scale:1}} className="flex items-center gap-1.5"><CheckCircle2 size={14}/> Brand Added!</motion.span>
-                : <motion.span key="pub"  initial={{opacity:0,scale:0.8}} animate={{opacity:1,scale:1}}>Publish Brand</motion.span>
+                : <motion.span key="pub"  initial={{opacity:0,scale:0.8}} animate={{opacity:1,scale:1}}>{saving?"Saving…":"Publish Brand"}</motion.span>
               }
             </AnimatePresence>
           </motion.button>

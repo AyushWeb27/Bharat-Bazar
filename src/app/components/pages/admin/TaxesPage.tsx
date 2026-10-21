@@ -1,20 +1,49 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion } from "motion/react";
 import {
   Percent, CheckCircle2, Layers, Package, Pencil, Trash2,
 } from "lucide-react";
-import type { TaxRule } from "./shared/types";
-import { INIT_TAXES } from "./shared/data";
+import type { TaxRule, TaxType } from "./shared/types";
 import { G, taxTypeMeta, inp, card } from "./shared/constants";
 import { PageHeader, SearchBar, StatCard, Modal, Field, Toggle, StatusPill, DeleteConfirm } from "./shared/ui";
 
 export function TaxesPage() {
-  const [taxes,    setTaxes   ] = useState<TaxRule[]>(INIT_TAXES);
+  const [taxes,    setTaxes   ] = useState<TaxRule[]>([]);
   const [search,   setSearch  ] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [modalOpen,setModalOpen] = useState(false);
   const [editId,   setEditId  ] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TaxRule | null>(null);
-  const [form, setForm] = useState({ name: "", slab: 18, type: "GST" as "GST"|"IGST"|"Customs", category: "", active: true });
+  const [form, setForm] = useState({ name: "", slab: 18 as number | null, rateLabel: "18%", type: "GST" as TaxType, category: "*", active: true });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadTaxes() {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch("/api/admin/taxes", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !Array.isArray(result.taxes)) {
+          throw new Error(result.message || "Failed to load tax rules.");
+        }
+        setTaxes(result.taxes as TaxRule[]);
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : "Failed to load tax rules.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void loadTaxes();
+    return () => controller.abort();
+  }, []);
 
   const filtered = useMemo(() =>
     taxes.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.category.toLowerCase().includes(search.toLowerCase()))
@@ -24,28 +53,64 @@ export function TaxesPage() {
 
   function openAdd() {
     setEditId(null);
-    setForm({ name: "", slab: 18, type: "GST", category: "", active: true });
+    setForm({ name: "", slab: 18, rateLabel: "18%", type: "GST", category: "*", active: true });
     setModalOpen(true);
   }
   function openEdit(t: TaxRule) {
     setEditId(t.id);
-    setForm({ name: t.name, slab: t.slab, type: t.type, category: t.category, active: t.active });
+    setForm({ name: t.name, slab: t.slab, rateLabel: t.rateLabel, type: t.type, category: t.category, active: t.active });
     setModalOpen(true);
   }
-  function handleSave() {
-    if (!form.name.trim()) return;
-    if (editId !== null) {
-      setTaxes(prev => prev.map(t => t.id === editId ? { ...t, ...form } : t));
-    } else {
-      const newId = Math.max(...taxes.map(t => t.id)) + 1;
-      setTaxes(prev => [...prev, { id: newId, ...form, products: 0 }]);
+  async function handleSave() {
+    setError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/taxes", {
+        method: editId === null ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, rate: form.slab, id: editId }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to save tax rule.");
+      }
+      const savedTax = result.tax as TaxRule;
+      setTaxes(previous => previous.some(tax => tax.id === savedTax.id)
+        ? previous.map(tax => tax.id === savedTax.id ? savedTax : tax)
+        : [...previous, savedTax]);
+      setModalOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save tax rule.");
+    } finally {
+      setSaving(false);
     }
-    setModalOpen(false);
   }
-  function toggleStatus(id: number) {
-    setTaxes(prev => prev.map(t => t.id === id ? { ...t, active: !t.active } : t));
+  async function toggleStatus(id: number) {
+    const tax = taxes.find(item => item.id === id);
+    if (!tax) return;
+    try {
+      const response = await fetch("/api/admin/taxes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...tax, rate: tax.slab, active: !tax.active }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to update tax rule.");
+      setTaxes(previous => previous.map(item => item.id === id ? result.tax as TaxRule : item));
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Failed to update tax rule.");
+    }
   }
-  function handleDelete(id: number) { setTaxes(prev => prev.filter(t => t.id !== id)); }
+  async function handleDelete(id: number) {
+    try {
+      const response = await fetch(`/api/admin/taxes?id=${id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to delete tax rule.");
+      setTaxes(prev => prev.filter(t => t.id !== id));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete tax rule.");
+    }
+  }
 
   const totalProducts = taxes.reduce((a, t) => a + t.products, 0);
   const activeTaxes   = taxes.filter(t => t.active).length;
@@ -54,13 +119,14 @@ export function TaxesPage() {
     <div className="space-y-5">
       <PageHeader breadcrumb="Products › Taxes" title="Tax Rules" subtitle="Manage GST, IGST and customs duties"
         count={taxes.length} onAdd={openAdd} addLabel="Add Tax Rule" />
+      {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total Rules"     val={taxes.length}                color="#6366f1" icon={Percent}      />
         <StatCard label="Active Rules"    val={activeTaxes}                 color={G}       icon={CheckCircle2} />
         <StatCard label="Products Taxed"  val={totalProducts.toLocaleString("en-IN")} color="#f59e0b" icon={Package} />
-        <StatCard label="GST Slabs"       val="5"                           color="#8b5cf6" icon={Layers}       />
+        <StatCard label="GST Slabs"       val={new Set(taxes.filter(t => t.type === "GST" && t.slab !== null).map(t => t.slab)).size} color="#8b5cf6" icon={Layers} />
       </div>
 
       {/* GST slab overview */}
@@ -110,8 +176,8 @@ export function TaxesPage() {
                       <p className="text-xs font-bold text-gray-800">{t.name}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xl font-black" style={{ color: t.slab === 0 ? G : t.slab <= 12 ? "#3b82f6" : t.slab <= 18 ? "#8b5cf6" : "#ef4444" }}>
-                        {t.slab}%
+                      <span className="text-xl font-black" style={{ color: t.slab === null ? "#f59e0b" : t.slab === 0 ? G : t.slab <= 12 ? "#3b82f6" : t.slab <= 18 ? "#8b5cf6" : "#ef4444" }}>
+                        {t.rateLabel || (t.slab === null ? "Not configured" : `${t.slab}%`)}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -146,6 +212,14 @@ export function TaxesPage() {
                   </motion.tr>
                 );
               })}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">
+                  {error ? "Tax rules could not be loaded." : "No tax rules found. Add a rule to get started."}
+                </td></tr>
+              )}
+              {loading && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">Loading tax rules…</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -161,34 +235,28 @@ export function TaxesPage() {
             placeholder="e.g. GST 18% — Electronics" className={inp} />
         </Field>
         <Field label="Tax Type">
-          <div className="flex gap-2">
-            {(["GST","IGST","Customs"] as const).map(type => (
-              <button key={type} onClick={() => setForm(f => ({ ...f, type }))}
-                className="flex-1 py-2.5 rounded-xl border text-xs font-black transition-all"
-                style={form.type === type
-                  ? { background: G, color: "#fff", borderColor: G }
-                  : { background: "#fff", color: "#6b7280", borderColor: "#e5e7eb" }}>
-                {type}
-              </button>
+          <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as TaxType }))} className={inp}>
+            {(["GST", "Central Tax", "State Tax", "Union Territory Tax", "Integrated Tax", "IGST", "Cess", "Customs"] as TaxType[]).map(type => (
+              <option key={type} value={type}>{type}</option>
             ))}
-          </div>
+          </select>
         </Field>
-        <Field label="Tax Slab (%)">
-          <div className="grid grid-cols-5 gap-2">
-            {[0,5,12,18,28].map(s => (
-              <button key={s} onClick={() => setForm(f => ({ ...f, slab: s }))}
-                className="py-2.5 rounded-xl border text-sm font-black transition-all"
-                style={form.slab === s
-                  ? { background: G, color: "#fff", borderColor: G }
-                  : { background: "#fff", color: "#6b7280", borderColor: "#e5e7eb" }}>
-                {s}%
-              </button>
-            ))}
-          </div>
+        <Field label="Tax Rate (%)">
+          <input type="number" min="0" max="100" step="0.01" value={form.slab ?? ""}
+            onChange={e => setForm(f => ({
+              ...f,
+              slab: e.target.value === "" ? null : Number(e.target.value),
+              rateLabel: e.target.value === "" ? "" : `${Number(e.target.value)}%`,
+            }))}
+            placeholder="Leave blank if variable / not configured" className={inp} />
         </Field>
-        <Field label="Applies to Category">
+        <Field label="Rate Label" hint="Used to display variable or product-specific rates">
+          <input value={form.rateLabel} onChange={e => setForm(f => ({ ...f, rateLabel: e.target.value }))}
+            placeholder="e.g. 0%–14%* or Product-specific" className={inp} />
+        </Field>
+        <Field label="Category / Tax Scope" hint="Descriptive scope; product tax jurisdiction is selected by the admin">
           <input value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-            placeholder="e.g. Electronics & Apparel" className={inp} />
+            placeholder="Category name or *" className={inp} />
         </Field>
         <Field label="Status">
           <div className="flex items-center gap-3 pt-1">
@@ -198,8 +266,8 @@ export function TaxesPage() {
         </Field>
         <div className="flex gap-3 pt-2">
           <button onClick={() => setModalOpen(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">Cancel</button>
-          <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all" style={{ background: G }}>
-            {editId ? "Save Changes" : "Add Rule"}
+          <button onClick={() => void handleSave()} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all disabled:opacity-60" style={{ background: G }}>
+            {saving ? "Saving…" : editId ? "Save Changes" : "Add Rule"}
           </button>
         </div>
       </Modal>
@@ -207,7 +275,7 @@ export function TaxesPage() {
       <DeleteConfirm
         open={!!deleteTarget} name={deleteTarget?.name ?? ""}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void handleDelete(deleteTarget.id)}
       />
     </div>
   );

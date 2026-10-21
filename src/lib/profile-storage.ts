@@ -12,6 +12,64 @@ export const CATEGORY_IMAGE_BUCKET_NAME =
   process.env.AWS_CATEGORY_IMAGES_BUCKET_NAME || "category-images";
 export const SUBCATEGORY_IMAGE_BUCKET_NAME =
   process.env.AWS_SUBCATEGORIES_IMAGES_BUCKET_NAME || "subcategories-images";
+export const BRAND_IMAGE_BUCKET_NAME =
+  process.env.AWS_BRANDS_IMAGES_BUCKET_NAME || "brands-images";
+export const PRODUCT_MEDIA_BUCKET_NAME =
+  process.env.AWS_PRODUCTS_MEDIA_BUCKET_NAME || "product-main-image-video";
+
+export type ProductMediaKind = "main-image" | "gallery-image" | "video";
+
+function getProductMediaKey(productId: number, kind: ProductMediaKind, index?: number) {
+  if (kind === "gallery-image") {
+    if (!Number.isSafeInteger(index) || (index ?? -1) < 0 || (index ?? 6) > 5) {
+      throw new Error("A valid gallery image index is required.");
+    }
+    return `products/${productId}/gallery-${index}`;
+  }
+  if (kind === "video") return `products/${productId}/video`;
+  return `products/${productId}/main-image`;
+}
+
+export async function saveProductMedia(
+  productId: number,
+  kind: ProductMediaKind,
+  body: Uint8Array,
+  contentType: string,
+  index?: number
+) {
+  const { bucket, client } = getProfileStorageConfig(PRODUCT_MEDIA_BUCKET_NAME);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: getProductMediaKey(productId, kind, index),
+    Body: body,
+    ContentType: contentType,
+    CacheControl: "private, max-age=300",
+  }));
+}
+
+export async function loadProductMedia(
+  productId: number,
+  kind: ProductMediaKind,
+  index?: number
+) {
+  const { bucket, client } = getProfileStorageConfig(PRODUCT_MEDIA_BUCKET_NAME);
+  return client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: getProductMediaKey(productId, kind, index),
+  }));
+}
+
+export async function deleteProductMedia(
+  productId: number,
+  kind: ProductMediaKind,
+  index?: number
+) {
+  const { bucket, client } = getProfileStorageConfig(PRODUCT_MEDIA_BUCKET_NAME);
+  await client.send(new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: getProductMediaKey(productId, kind, index),
+  }));
+}
 
 export function getProfileStorageConfig(bucketName = process.env.AWS_BUCKET_NAME) {
   const endpoint = process.env.AWS_ENDPOINT_URL_S3;
@@ -161,5 +219,32 @@ export async function deleteSubcategoryImage(subcategoryId: number) {
   await client.send(new DeleteObjectCommand({
     Bucket: bucket,
     Key: `subcategories/${subcategoryId}/image`,
+  }));
+}
+
+export async function saveBrandImage(brandId: number, body: Uint8Array, contentType: string) {
+  const { bucket, client } = getProfileStorageConfig(BRAND_IMAGE_BUCKET_NAME);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: `brands/${brandId}/logo`,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: "private, max-age=300",
+  }));
+}
+
+export async function loadBrandImage(brandId: number) {
+  const { bucket, client } = getProfileStorageConfig(BRAND_IMAGE_BUCKET_NAME);
+  return client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: `brands/${brandId}/logo`,
+  }));
+}
+
+export async function deleteBrandImage(brandId: number) {
+  const { bucket, client } = getProfileStorageConfig(BRAND_IMAGE_BUCKET_NAME);
+  await client.send(new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: `brands/${brandId}/logo`,
   }));
 }

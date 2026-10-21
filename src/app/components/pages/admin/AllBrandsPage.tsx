@@ -1,11 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Award, CheckCircle2, Star, BadgeCheck, Globe,
   Pencil, Trash2, Upload,
 } from "lucide-react";
 import type { Brand } from "./shared/types";
-import { INIT_BRANDS, INIT_CATS } from "./shared/data";
 import { G, toSlug, getBrandCatColor, inp, card } from "./shared/constants";
 import { PageHeader, SearchBar, StatCard, Modal, Field, Toggle, StatusPill, DeleteConfirm } from "./shared/ui";
 
@@ -26,8 +25,15 @@ function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: str
   );
 }
 
+type CategoryOption = { id: number; name: string; emoji: string };
+
 export function AllBrandsPage() {
-  const [brands,    setBrands   ] = useState<Brand[]>(INIT_BRANDS);
+  const [brands,    setBrands   ] = useState<Brand[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoryError, setCategoryError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
   const [search,    setSearch   ] = useState("");
   const [filterCat, setFilterCat] = useState("All");
   const [filterSts, setFilterSts] = useState("all");
@@ -35,14 +41,66 @@ export function AllBrandsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editId,    setEditId   ] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
-    name: "", slug: "", category: INIT_CATS[0].name, logoColor: G, logoUrl: "",
+    name: "", slug: "", category: "", logoColor: G, logoUrl: "", description: "",
     country: "India", countryFlag: "🇮🇳", website: "",
     featured: false, active: true, premium: false,
   });
 
-  const cats     = ["All", ...Array.from(new Set(INIT_BRANDS.map(b => b.category)))];
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      fetch("/api/admin/brands", { cache: "no-store" }),
+      fetch("/api/admin/categories", { cache: "no-store" }),
+    ])
+      .then(async ([brandResponse, categoryResponse]) => {
+        const [brandResult, categoryResult] = await Promise.all([
+          brandResponse.json(),
+          categoryResponse.json(),
+        ]);
+        if (!brandResponse.ok || !brandResult.success) {
+          throw new Error(brandResult.message || "Failed to load brands.");
+        }
+        if (!categoryResponse.ok || !categoryResult.success || !Array.isArray(categoryResult.categories)) {
+          throw new Error(categoryResult.message || "Failed to load categories.");
+        }
+        if (!mounted) return;
+        setBrands(brandResult.brands as Brand[]);
+        const options = categoryResult.categories.filter(
+          (item: unknown): item is CategoryOption =>
+            Boolean(item && typeof item === "object" &&
+              "id" in item && typeof item.id === "number" &&
+              "name" in item && typeof item.name === "string" &&
+              "emoji" in item && typeof item.emoji === "string")
+        );
+        setCategories(options);
+        setCategoryError(options.length ? "" : "No categories found in the database.");
+        setForm(current => ({
+          ...current,
+          category: current.category || options[0]?.name || "",
+        }));
+      })
+      .catch(error => {
+        if (mounted) {
+          const message = error instanceof Error ? error.message : "Failed to load brands and categories.";
+          setPageError(message);
+          setCategoryError(message);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsLoading(false);
+          setCategoriesLoading(false);
+        }
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  const cats     = ["All", ...categories.map(category => category.name)];
   const filtered = useMemo(() => brands.filter(b => {
     const q = search.toLowerCase();
     const matchQ = !q || b.name.toLowerCase().includes(q) || b.slug.includes(q);
@@ -64,32 +122,103 @@ export function AllBrandsPage() {
 
   function openAdd() {
     setEditId(null);
-    setForm({ name:"",slug:"",category:INIT_CATS[0].name,logoColor:G,logoUrl:"",country:"India",countryFlag:"🇮🇳",website:"",featured:false,active:true,premium:false });
+    setLogoFile(null);
+    setRemoveLogo(false);
+    setPageError("");
+    setForm({ name:"",slug:"",category:categories[0]?.name ?? "",logoColor:G,logoUrl:"",description:"",country:"India",countryFlag:"🇮🇳",website:"",featured:false,active:true,premium:false });
     setModalOpen(true);
   }
   function openEdit(b: Brand) {
     setEditId(b.id);
-    setForm({ name:b.name,slug:b.slug,category:b.category,logoColor:b.logoColor,logoUrl:b.logoUrl??"",country:b.country,countryFlag:b.countryFlag,website:b.website,featured:b.featured,active:b.active,premium:b.premium });
+    setLogoFile(null);
+    setRemoveLogo(false);
+    setPageError("");
+    setForm({ name:b.name,slug:b.slug,category:b.category,logoColor:b.logoColor,logoUrl:b.logoUrl??"",description:b.description??"",country:b.country,countryFlag:b.countryFlag,website:b.website,featured:b.featured,active:b.active,premium:b.premium });
     setModalOpen(true);
   }
-  function handleSave() {
-    if (!form.name.trim()) return;
-    const logoInit = form.name.split(" ").map(w=>w[0]).join("").slice(0,2);
-    if (editId !== null) {
-      setBrands(prev => prev.map(b => b.id === editId ? { ...b, ...form, logoInit } : b));
-    } else {
-      const newId = Math.max(...brands.map(b=>b.id)) + 1;
-      setBrands(prev => [...prev, { id: newId, ...form, logoInit, products: 0 }]);
+  async function handleSave() {
+    setPageError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/brands", {
+        method: editId === null ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, id: editId, logoUrl: undefined }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to save brand.");
+      const savedBrand = result.brand as Brand;
+      let savedLogoUrl = savedBrand.logoUrl;
+      setBrands(previous => editId === null
+        ? [...previous.filter(brand => brand.id !== savedBrand.id), savedBrand]
+        : previous.map(brand => brand.id === savedBrand.id ? { ...savedBrand, logoUrl: brand.logoUrl } : brand));
+      if (logoFile) {
+        const imageData = new FormData();
+        imageData.append("image", logoFile);
+        const imageResponse = await fetch(`/api/admin/brands/${savedBrand.id}/image`, { method: "POST", body: imageData });
+        const imageResult = await imageResponse.json();
+        if (!imageResponse.ok || !imageResult.success) throw new Error(`Brand saved, but the image upload failed: ${imageResult.message || "Upload failed."}`);
+        savedLogoUrl = imageResult.logoUrl;
+      } else if (removeLogo && editId !== null) {
+        const imageResponse = await fetch(`/api/admin/brands/${savedBrand.id}/image`, { method: "DELETE" });
+        const imageResult = await imageResponse.json();
+        if (!imageResponse.ok || !imageResult.success) throw new Error(imageResult.message || "Failed to remove brand image.");
+        savedLogoUrl = undefined;
+      }
+      const finalBrand = { ...savedBrand, logoUrl: savedLogoUrl };
+      setBrands(previous => previous.some(brand => brand.id === finalBrand.id)
+        ? previous.map(brand => brand.id === finalBrand.id ? finalBrand : brand)
+        : [...previous, finalBrand]);
+      setModalOpen(false);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to save brand.");
+    } finally {
+      setSaving(false);
     }
-    setModalOpen(false);
   }
-  function toggleStatus(id: number) { setBrands(prev => prev.map(b => b.id === id ? { ...b, active: !b.active } : b)); }
-  function toggleFeatured(id: number) { setBrands(prev => prev.map(b => b.id === id ? { ...b, featured: !b.featured } : b)); }
+  async function updateBrand(id: number, updates: Partial<Brand>) {
+    const current = brands.find(brand => brand.id === id);
+    if (!current) return;
+    try {
+      const response = await fetch("/api/admin/brands", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...current, ...updates, id, logoColor: current.logoColor, description: current.description ?? "" }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to update brand.");
+      setBrands(previous => previous.map(brand => brand.id === id ? { ...result.brand, logoUrl: current.logoUrl } : brand));
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to update brand.");
+    }
+  }
+  function toggleStatus(id: number) {
+    const brand = brands.find(item => item.id === id);
+    if (brand) void updateBrand(id, { active: !brand.active });
+  }
+  function toggleFeatured(id: number) {
+    const brand = brands.find(item => item.id === id);
+    if (brand) void updateBrand(id, { featured: !brand.featured });
+  }
+
+  async function deleteBrand(id: number) {
+    try {
+      const response = await fetch(`/api/admin/brands?id=${id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to delete brand.");
+      setBrands(previous => previous.filter(brand => brand.id !== id));
+      setDeleteTarget(null);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to delete brand.");
+    }
+  }
 
   return (
     <div className="space-y-5">
       <PageHeader breadcrumb="Brands › All Brands" title="All Brands" subtitle="Manage your brand catalogue" count={brands.length}
         onAdd={openAdd} addLabel="Add Brand" />
+      {pageError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{pageError}</p>}
+      {isLoading && <p className="text-sm text-gray-500">Loading brands…</p>}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -208,7 +337,7 @@ export function AllBrandsPage() {
                     </td>
                     <td className="px-4 py-3"><span className="text-xs text-gray-500 whitespace-nowrap">{b.countryFlag} {b.country}</span></td>
                     <td className="px-4 py-3">
-                      <a className="flex items-center gap-1 text-[11px] text-blue-500 hover:underline whitespace-nowrap" href={`https://${b.website}`} target="_blank" rel="noreferrer">
+                      <a className="flex items-center gap-1 text-[11px] text-blue-500 hover:underline whitespace-nowrap" href={b.website.startsWith("http")?b.website:`https://${b.website}`} target="_blank" rel="noreferrer">
                         <Globe size={10}/> {b.website}
                       </a>
                     </td>
@@ -252,10 +381,17 @@ export function AllBrandsPage() {
           <Field label="Slug">
             <input value={form.slug} onChange={e=>setForm(f=>({...f,slug:toSlug(e.target.value)}))} placeholder="apple" className={`${inp} font-mono text-[13px]`}/>
           </Field>
-          <Field label="Category">
-            <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} className={inp}>
-              {INIT_CATS.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
+          <Field label="Category" required>
+            <select
+              value={form.category}
+              onChange={e=>setForm(f=>({...f,category:e.target.value}))}
+              className={inp}
+              disabled={categoriesLoading || categories.length === 0}
+            >
+              <option value="">{categoriesLoading ? "Loading categories…" : "Select a category…"}</option>
+              {categories.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
             </select>
+            {categoryError && <p role="alert" className="mt-1 text-xs text-red-600">{categoryError}</p>}
           </Field>
           <Field label="Country of Origin">
             <select value={form.country} onChange={e=>{const found=COUNTRIES.find(x=>x.name===e.target.value);setForm(f=>({...f,country:e.target.value,countryFlag:found?found.flag:"🌐"}))}} className={inp}>
@@ -267,6 +403,11 @@ export function AllBrandsPage() {
           <div className="sm:col-span-2">
             <Field label="Website URL">
               <input value={form.website} onChange={e=>setForm(f=>({...f,website:e.target.value}))} placeholder="apple.com" className={inp}/>
+            </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Description">
+              <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} maxLength={1000} rows={3} className={`${inp} resize-none`}/>
             </Field>
           </div>
         </div>
@@ -289,12 +430,18 @@ export function AllBrandsPage() {
             {/* Upload controls */}
             <div className="flex-1 space-y-2">
               <label className="cursor-pointer block">
-                <input type="file" accept="image/*" className="hidden" onChange={e=>{
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e=>{
                   const file=e.target.files?.[0];
                   if(!file)return;
-                  const reader=new FileReader();
-                  reader.onload=ev=>setForm(f=>({...f,logoUrl:ev.target?.result as string}));
-                  reader.readAsDataURL(file);
+                  if (file.size > 2 * 1024 * 1024) {
+                    setPageError("Brand images must be smaller than 2 MB.");
+                    e.target.value="";
+                    return;
+                  }
+                  setLogoFile(file);
+                  setRemoveLogo(false);
+                  setForm(f=>({...f,logoUrl:URL.createObjectURL(file)}));
+                  setPageError("");
                   e.target.value="";
                 }}/>
                 <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-700 hover:border-[#009966] hover:text-[#009966] hover:bg-[#009966]/5 transition-all">
@@ -302,12 +449,12 @@ export function AllBrandsPage() {
                 </span>
               </label>
               {form.logoUrl && (
-                <button onClick={()=>setForm(f=>({...f,logoUrl:""}))}
+                <button onClick={()=>{setLogoFile(null);setRemoveLogo(true);setForm(f=>({...f,logoUrl:""}));}}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-red-400 hover:bg-red-50 hover:border-red-300 transition-all w-full">
                   <Trash2 size={12}/> Remove Logo
                 </button>
               )}
-              <p className="text-[10px] text-gray-400">PNG, JPG, SVG, WebP · Max 2MB</p>
+              <p className="text-[10px] text-gray-400">PNG, JPG, WebP · Max 2MB</p>
             </div>
           </div>
 
@@ -355,14 +502,14 @@ export function AllBrandsPage() {
 
         <div className="flex gap-3 pt-2">
           <button onClick={()=>setModalOpen(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">Cancel</button>
-          <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all" style={{background:G}}>
-            {editId?"Save Changes":"Add Brand"}
+          <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all disabled:opacity-60" style={{background:G}}>
+            {saving ? "Saving…" : editId?"Save Changes":"Add Brand"}
           </button>
         </div>
       </Modal>
 
       <DeleteConfirm open={!!deleteTarget} name={deleteTarget?.name??""} onClose={()=>setDeleteTarget(null)}
-        onConfirm={()=>deleteTarget&&setBrands(p=>p.filter(b=>b.id!==deleteTarget.id))}/>
+        onConfirm={()=>deleteTarget&&void deleteBrand(deleteTarget.id)}/>
     </div>
   );
 }
