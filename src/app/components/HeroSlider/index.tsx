@@ -1,11 +1,82 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronLeft, ChevronRight, ArrowRight, Pause, Play } from "lucide-react";
-import { SLIDER_DATA } from "../data/index";
 
 const DURATION = 5000;
 
+type StoreBanner = {
+  id: number;
+  title: string;
+  badge: string;
+  line1: string;
+  line2: string;
+  line3: string;
+  offer: string;
+  subtitle: string;
+  cta: string;
+  ctaSub: string;
+  tags: string[];
+  stats: Array<{ v: string; l: string }>;
+  link: string;
+  imageUrl: string;
+  productImageUrl: string;
+  gradientFrom: string;
+  gradientTo: string;
+};
+
+type SliderSlide = {
+  id: number;
+  num: string;
+  badge: string;
+  line1: string;
+  line2: string;
+  line3: string;
+  offer: string;
+  sub: string;
+  cta: string;
+  ctaSub: string;
+  stats: Array<{ v: string; l: string }>;
+  bg: string;
+  accent: string;
+  accentLight: string;
+  textOffer: string;
+  bgImg: string;
+  prodImg: string;
+  thumb: string;
+  bigText: string;
+  tags: string[];
+  link?: string;
+};
+
+function isStoreBanner(value: unknown): value is StoreBanner {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const banner = value as Record<string, unknown>;
+  return typeof banner.id === "number" && typeof banner.title === "string" &&
+    typeof banner.badge === "string" && typeof banner.line1 === "string" &&
+    typeof banner.line2 === "string" && typeof banner.line3 === "string" &&
+    typeof banner.offer === "string" &&
+    typeof banner.subtitle === "string" && typeof banner.cta === "string" &&
+    typeof banner.ctaSub === "string" &&
+    Array.isArray(banner.tags) && banner.tags.every(tag => typeof tag === "string") &&
+    Array.isArray(banner.stats) && banner.stats.every(stat =>
+      Boolean(stat && typeof stat === "object" &&
+        "v" in stat && typeof stat.v === "string" &&
+        "l" in stat && typeof stat.l === "string")) &&
+    typeof banner.link === "string" && typeof banner.imageUrl === "string" &&
+    typeof banner.productImageUrl === "string" &&
+    typeof banner.gradientFrom === "string" && typeof banner.gradientTo === "string";
+}
+
+function getDarkBackground(color: string): string {
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  if (!match) return "#001208";
+  const channels = match.slice(1).map(value => Math.round(parseInt(value, 16) * 0.12));
+  return `#${channels.map(value => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function HeroSlider({ onShop }: { onShop: () => void }) {
+  const [banners, setBanners] = useState<StoreBanner[]>([]);
+  const [bannerLoadState, setBannerLoadState] = useState<"loading" | "loaded" | "failed">("loading");
   const [cur, setCur] = useState(0);
   const [dir, setDir] = useState(1);           // 1 = forward, -1 = back
   const [paused, setPaused] = useState(false);
@@ -13,6 +84,54 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number>(performance.now());
   const pausedAt = useRef<number>(0);
+  const slides: SliderSlide[] = banners.map((banner, index) => ({
+      id: banner.id,
+      num: String(index + 1).padStart(2, "0"),
+      badge: banner.badge || "Bharat Bazar Special",
+      line1: banner.line1 || banner.title,
+      line2: banner.line2,
+      line3: banner.line3,
+      offer: banner.offer || banner.subtitle,
+      sub: banner.subtitle,
+      cta: banner.cta || "Shop Now",
+      ctaSub: banner.ctaSub,
+      stats: banner.stats,
+      bg: getDarkBackground(banner.gradientFrom),
+      accent: banner.gradientFrom,
+      accentLight: banner.gradientTo,
+      textOffer: "#fbbf24",
+      bgImg: banner.imageUrl,
+      prodImg: banner.productImageUrl,
+      thumb: banner.imageUrl,
+      bigText: "",
+      tags: banner.tags,
+      link: banner.link,
+    }));
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadBanners() {
+      try {
+        const response = await fetch("/api/banners", { cache: "no-store", signal: controller.signal });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" || !("success" in result) ||
+            result.success !== true || !("banners" in result) || !Array.isArray(result.banners) ||
+            !result.banners.every(isStoreBanner)) {
+          throw new Error("Could not load storefront banners.");
+        }
+        setBanners(result.banners);
+        setBannerLoadState("loaded");
+        setCur(0);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load storefront banners:", error);
+          setBannerLoadState("failed");
+        }
+      }
+    }
+    void loadBanners();
+    return () => controller.abort();
+  }, []);
 
   const goTo = useCallback((idx: number, d: number) => {
     setDir(d);
@@ -21,10 +140,11 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
     startRef.current = performance.now();
   }, []);
 
-  const prev = () => goTo((cur - 1 + SLIDER_DATA.length) % SLIDER_DATA.length, -1);
-  const next = () => goTo((cur + 1) % SLIDER_DATA.length, 1);
+  const prev = () => goTo((cur - 1 + slides.length) % slides.length, -1);
+  const next = () => goTo((cur + 1) % slides.length, 1);
 
   useEffect(() => {
+    if (slides.length === 0) return;
     if (paused) {
       pausedAt.current = performance.now();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -39,7 +159,7 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
       const p = Math.min((elapsed / DURATION) * 100, 100);
       setProg(p);
       if (p >= 100) {
-        setCur(c => (c + 1) % SLIDER_DATA.length);
+        setCur(c => (c + 1) % slides.length);
         setDir(1);
         startRef.current = performance.now();
         setProg(0);
@@ -48,9 +168,11 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [paused, cur]);
+  }, [paused, cur, slides.length]);
 
-  const s = SLIDER_DATA[cur];
+  if (bannerLoadState !== "loaded" || banners.length === 0) return null;
+
+  const s = slides[cur] ?? slides[0];
 
   const variants = {
     enter: (d: number) => ({ x: d > 0 ? "4%" : "-4%", opacity: 0 }),
@@ -251,7 +373,10 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
                   transition={{ delay: 0.3 }}
                 >
                   <motion.button
-                    onClick={onShop}
+                    onClick={() => {
+                      if (s.link) window.location.assign(s.link);
+                      else onShop();
+                    }}
                     whileHover={{ scale: 1.05, y: -2 }}
                     whileTap={{ scale: 0.96 }}
                     className="flex items-center gap-2 font-black rounded-xl text-xs sm:text-sm shadow-lg transition-shadow"
@@ -279,7 +404,7 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 exit={{ opacity: 0, x: -30, scale: 0.96 }}
                 transition={{ duration: 0.6, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-                className="hidden md:block relative shrink-0"
+                className={`${s.prodImg ? "relative hidden md:block" : "hidden"} shrink-0`}
               >
                 {/* Glow */}
                 <div
@@ -339,7 +464,7 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
           <div className="flex items-center justify-between">
             {/* Slide dot indicators */}
             <div className="flex items-center gap-3">
-              {SLIDER_DATA.map((sl, i) => (
+              {slides.map((sl, i) => (
                 <button
                   key={sl.id}
                   onClick={() => goTo(i, i > cur ? 1 : -1)}
@@ -370,7 +495,7 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
               <div className="hidden sm:flex items-center gap-1 text-white/35 text-[10px] font-bold tabular-nums ml-1">
                 <span style={{ color: s.accentLight }}>{String(cur + 1).padStart(2, "0")}</span>
                 <span>/</span>
-                <span>{String(SLIDER_DATA.length).padStart(2, "0")}</span>
+                <span>{String(slides.length).padStart(2, "0")}</span>
               </div>
             </div>
 
@@ -421,7 +546,7 @@ export function HeroSlider({ onShop }: { onShop: () => void }) {
 
       {/* ── Vertical dot nav — large desktop only ────────────────── */}
       <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hidden xl:flex flex-col items-center gap-2">
-        {SLIDER_DATA.map((_, i) => (
+        {slides.map((_, i) => (
           <motion.button
             key={i}
             onClick={() => goTo(i, i > cur ? 1 : -1)}

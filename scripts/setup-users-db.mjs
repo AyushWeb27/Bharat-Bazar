@@ -30,6 +30,9 @@ async function setupUsers() {
     );
   `;
 
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(30)`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS vip BOOLEAN NOT NULL DEFAULT FALSE`;
   await sql`CREATE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email));`;
   await sql`CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);`;
 

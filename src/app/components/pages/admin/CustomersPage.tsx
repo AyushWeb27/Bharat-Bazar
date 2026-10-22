@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Users, UserPlus, BarChart2, Star,
+  Users, UserPlus, BarChart2, Star, RefreshCw,
   Pencil, Trash2,
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { G, fmt, card, inp } from "./shared/constants";
+import { G, card, inp } from "./shared/constants";
 import {
   PageHeader, StatCard, SearchBar, Modal, DeleteConfirm, Field,
 } from "./shared/ui";
@@ -21,39 +21,24 @@ interface Customer {
   name: string;
   email: string;
   phone: string;
-  orders: number;
-  spent: number;
+  gender: string;
+  dateOfBirth: string;
+  orders: number | null;
+  spent: number | null;
   status: CustomerStatus;
   vip: boolean;
-  joined: string;
+  emailVerified: boolean;
+  authProvider: string;
+  joined: string | null;
+  lastLogin: string | null;
 }
 
-// ─── Sample data ──────────────────────────────────────────────────────────────
+type CustomerForm = Pick<Customer, "name" | "email" | "phone" | "gender" | "dateOfBirth" | "status" | "vip">;
+type CustomerStats = { total: number; newThisMonth: number; active: number; vip: number };
 
-const INIT_CUSTOMERS: Customer[] = [
-  { id:  1, name: "Priya Sharma",   email: "priya@gmail.com",    phone: "+91 98765 43210", orders: 24, spent: 58420, status: "Active",   vip: true,  joined: "Jan 2024" },
-  { id:  2, name: "Rahul Gupta",    email: "rahul@yahoo.com",    phone: "+91 87654 32109", orders: 18, spent: 32100, status: "Active",   vip: false, joined: "Mar 2024" },
-  { id:  3, name: "Anita Singh",    email: "anita@gmail.com",    phone: "+91 76543 21098", orders:  7, spent: 12340, status: "Inactive", vip: false, joined: "Jun 2024" },
-  { id:  4, name: "Vikram Patel",   email: "vikram@hotmail.com", phone: "+91 65432 10987", orders: 31, spent: 74890, status: "Active",   vip: true,  joined: "Oct 2023" },
-  { id:  5, name: "Neha Joshi",     email: "neha@gmail.com",     phone: "+91 54321 09876", orders: 12, spent: 28750, status: "Active",   vip: false, joined: "Apr 2024" },
-  { id:  6, name: "Arjun Kumar",    email: "arjun@outlook.com",  phone: "+91 43210 98765", orders:  3, spent:  5670, status: "Inactive", vip: false, joined: "Aug 2024" },
-  { id:  7, name: "Deepa Nair",     email: "deepa@gmail.com",    phone: "+91 32109 87654", orders: 45, spent: 98320, status: "Active",   vip: true,  joined: "Jul 2023" },
-  { id:  8, name: "Suresh Rao",     email: "suresh@yahoo.com",   phone: "+91 21098 76543", orders:  8, spent: 18900, status: "Active",   vip: false, joined: "Feb 2024" },
-  { id:  9, name: "Kavitha Iyer",   email: "kavitha@gmail.com",  phone: "+91 19876 54321", orders: 22, spent: 51200, status: "Active",   vip: true,  joined: "Nov 2023" },
-  { id: 10, name: "Mohan Das",      email: "mohan@gmail.com",    phone: "+91 98123 45678", orders:  5, spent:  9340, status: "Inactive", vip: false, joined: "Jul 2024" },
-  { id: 11, name: "Sunita Verma",   email: "sunita@gmail.com",   phone: "+91 87234 56789", orders: 19, spent: 43670, status: "Active",   vip: false, joined: "Dec 2023" },
-  { id: 12, name: "Ravi Krishnan",  email: "ravi@outlook.com",   phone: "+91 76345 67890", orders: 11, spent: 24800, status: "Active",   vip: false, joined: "Mar 2024" },
-  { id: 13, name: "Meera Pillai",   email: "meera@gmail.com",    phone: "+91 65456 78901", orders: 37, spent: 84300, status: "Active",   vip: true,  joined: "Sep 2023" },
-  { id: 14, name: "Arun Sharma",    email: "arun@yahoo.com",     phone: "+91 54567 89012", orders:  2, spent:  3200, status: "Inactive", vip: false, joined: "Sep 2024" },
-  { id: 15, name: "Pooja Mehta",    email: "pooja@gmail.com",    phone: "+91 43678 90123", orders: 28, spent: 63100, status: "Active",   vip: true,  joined: "Jan 2024" },
-];
-
-const SEGMENT_DATA = [
-  { name: "Regular",    value: 45, color: "#6b7280" },
-  { name: "Occasional", value: 28, color: "#3b82f6" },
-  { name: "Loyal",      value: 18, color: G          },
-  { name: "VIP",        value:  9, color: "#f59e0b"  },
-];
+const EMPTY_FORM: CustomerForm = {
+  name: "", email: "", phone: "", gender: "", dateOfBirth: "", status: "Active", vip: false,
+};
 
 const FILTER_TABS = ["All", "Active", "Inactive", "VIP"] as const;
 type FilterTab = typeof FILTER_TABS[number];
@@ -64,24 +49,83 @@ function initials(name: string) {
   return name.split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
 }
 
+function formatJoined(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+}
+
 const AVATAR_COLORS = [
   "#3b82f6","#8b5cf6","#ec4899","#f59e0b","#10b981",
   "#6366f1","#ef4444","#0d9488","#f97316","#84cc16",
 ];
 
+function isCustomer(value: unknown): value is Customer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const customer = value as Record<string, unknown>;
+  return typeof customer.id === "number" && typeof customer.name === "string" &&
+    typeof customer.email === "string" && typeof customer.phone === "string" &&
+    typeof customer.gender === "string" && typeof customer.dateOfBirth === "string" &&
+    (customer.orders === null || typeof customer.orders === "number") &&
+    (customer.spent === null || typeof customer.spent === "number") &&
+    (customer.status === "Active" || customer.status === "Inactive") &&
+    typeof customer.vip === "boolean" && typeof customer.emailVerified === "boolean" &&
+    typeof customer.authProvider === "string" &&
+    (customer.joined === null || typeof customer.joined === "string") &&
+    (customer.lastLogin === null || typeof customer.lastLogin === "string");
+}
+
+function isCustomerStats(value: unknown): value is CustomerStats {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const stats = value as Record<string, unknown>;
+  return ["total", "newThisMonth", "active", "vip"].every(key => {
+    const count = stats[key];
+    return typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CustomersPage() {
-  const [customers, setCustomers]         = useState<Customer[]>(INIT_CUSTOMERS);
+  const [customers, setCustomers]         = useState<Customer[]>([]);
+  const [stats, setStats] = useState<CustomerStats>({ total: 0, newThisMonth: 0, active: 0, vip: 0 });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [pageError, setPageError] = useState("");
   const [search, setSearch]               = useState("");
   const [tab, setTab]                     = useState<FilterTab>("All");
   const [editOpen, setEditOpen]           = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [deleteOpen, setDeleteOpen]       = useState(false);
   const [selected, setSelected]           = useState<Customer | null>(null);
-  const [editForm, setEditForm]           = useState<Partial<Customer>>({});
+  const [editForm, setEditForm]           = useState<CustomerForm>(EMPTY_FORM);
 
-  // Filtering
-  const visible = customers.filter(c => {
+  async function loadCustomers() {
+    setLoading(true);
+    setPageError("");
+    try {
+      const response = await fetch("/api/admin/customers", { cache: "no-store" });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || !("success" in result) ||
+          result.success !== true || !("customers" in result) || !Array.isArray(result.customers) ||
+          !result.customers.every(isCustomer) || !("stats" in result) || !isCustomerStats(result.stats)) {
+        const message = result && typeof result === "object" && "message" in result && typeof result.message === "string"
+          ? result.message : "Failed to load customers.";
+        throw new Error(message);
+      }
+      setCustomers(result.customers);
+      setStats(result.stats);
+    } catch (error) {
+      console.error("Failed to load admin customers:", error);
+      setPageError(error instanceof Error ? error.message : "Failed to load customers.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadCustomers(); }, []);
+
+  const visible = useMemo(() => customers.filter(c => {
     const q = search.toLowerCase();
     const matchSearch =
       c.name.toLowerCase().includes(q) ||
@@ -93,30 +137,84 @@ export function CustomersPage() {
       tab === "Active"   ? c.status === "Active" :
                            c.status === "Inactive";
     return matchSearch && matchTab;
-  });
+  }), [customers, search, tab]);
 
-  // Edit handlers
+  const segmentTotal = customers.length || 1;
+  const segmentData = [
+    { name: "Active non-VIP", count: customers.filter(customer => customer.status === "Active" && !customer.vip).length, color: G },
+    { name: "Active VIP", count: customers.filter(customer => customer.status === "Active" && customer.vip).length, color: "#f59e0b" },
+    { name: "Inactive", count: customers.filter(customer => customer.status === "Inactive").length, color: "#6b7280" },
+  ].map(segment => ({ ...segment, value: Math.round(segment.count / segmentTotal * 100) }));
+
   function openEdit(c: Customer) {
     setSelected(c);
-    setEditForm({ ...c });
+    setIsCreating(false);
+    setPageError("");
+    setEditForm({
+      name: c.name, email: c.email, phone: c.phone, gender: c.gender,
+      dateOfBirth: c.dateOfBirth, status: c.status, vip: c.vip,
+    });
     setEditOpen(true);
   }
 
-  function saveEdit() {
-    if (!selected) return;
-    setCustomers(prev => prev.map(c => c.id === selected.id ? { ...c, ...editForm } as Customer : c));
-    setEditOpen(false);
+  function openCreate() {
+    setSelected(null);
+    setIsCreating(true);
+    setEditForm(EMPTY_FORM);
+    setPageError("");
+    setEditOpen(true);
   }
 
-  // Delete handlers
+  async function saveEdit() {
+    setPageError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/customers", {
+        method: isCreating ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...editForm,
+          status: editForm.status.toLowerCase(),
+          ...(selected ? { id: selected.id } : {}),
+        }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result && typeof result.message === "string"
+          ? result.message : "Failed to save customer.";
+        throw new Error(message);
+      }
+      setEditOpen(false);
+      await loadCustomers();
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to save customer.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openDelete(c: Customer) {
     setSelected(c);
     setDeleteOpen(true);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!selected) return;
-    setCustomers(prev => prev.filter(c => c.id !== selected.id));
+    setPageError("");
+    try {
+      const response = await fetch(`/api/admin/customers?id=${selected.id}`, { method: "DELETE" });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result && typeof result.message === "string"
+          ? result.message : "Failed to deactivate customer.";
+        throw new Error(message);
+      }
+      setDeleteOpen(false);
+      setSelected(null);
+      await loadCustomers();
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Failed to deactivate customer.");
+    }
   }
 
   return (
@@ -126,8 +224,11 @@ export function CustomersPage() {
         breadcrumb="Customers"
         title="Customers"
         subtitle="Manage customer accounts and segments"
-        count={customers.length}
+        count={stats.total}
+        onAdd={openCreate}
+        addLabel="Add Customer"
       />
+      {pageError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{pageError}</p>}
 
       {/* Stat Cards */}
       <motion.div
@@ -136,10 +237,10 @@ export function CustomersPage() {
         transition={{ duration: 0.3 }}
         className="grid grid-cols-2 sm:grid-cols-4 gap-3"
       >
-        <StatCard label="Total Customers"  val="28,491" color="#3b82f6" icon={Users}    />
-        <StatCard label="New This Month"   val="1,247"  color={G}       icon={UserPlus} />
-        <StatCard label="Active"           val="19,834" color="#6366f1" icon={BarChart2} />
-        <StatCard label="VIP Members"      val="342"    color="#f59e0b" icon={Star}     />
+        <StatCard label="Total Customers"  val={stats.total.toLocaleString("en-IN")} color="#3b82f6" icon={Users}    />
+        <StatCard label="New This Month"   val={stats.newThisMonth.toLocaleString("en-IN")} color={G} icon={UserPlus} />
+        <StatCard label="Active"           val={stats.active.toLocaleString("en-IN")} color="#6366f1" icon={BarChart2} />
+        <StatCard label="VIP Members"      val={stats.vip.toLocaleString("en-IN")} color="#f59e0b" icon={Star}     />
       </motion.div>
 
       {/* Main card: search + table + donut */}
@@ -175,6 +276,11 @@ export function CustomersPage() {
                   {t}
                 </button>
               ))}
+              <button type="button" onClick={() => void loadCustomers()} disabled={loading}
+                aria-label="Refresh customers"
+                className="ml-1 flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-50">
+                <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              </button>
             </div>
           </div>
 
@@ -194,7 +300,7 @@ export function CustomersPage() {
               </thead>
               <AnimatePresence>
                 <tbody>
-                  {visible.map((c, i) => (
+                  {!loading && visible.map((c, i) => (
                     <motion.tr
                       key={c.id}
                       initial={{ opacity: 0 }}
@@ -229,9 +335,9 @@ export function CustomersPage() {
                       {/* Phone */}
                       <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{c.phone}</td>
                       {/* Orders */}
-                      <td className="px-3 py-3 text-center font-black text-gray-700">{c.orders}</td>
+                      <td className="px-3 py-3 text-center font-black text-gray-700" title="Order data is not available yet">—</td>
                       {/* Spent */}
-                      <td className="px-3 py-3 text-right font-black text-gray-800">{fmt(c.spent)}</td>
+                      <td className="px-3 py-3 text-right font-black text-gray-800" title="Order data is not available yet">—</td>
                       {/* Status */}
                       <td className="px-3 py-3 text-center">
                         <span
@@ -250,7 +356,7 @@ export function CustomersPage() {
                         </span>
                       </td>
                       {/* Joined */}
-                      <td className="px-3 py-3 text-gray-500">{c.joined}</td>
+                      <td className="px-3 py-3 whitespace-nowrap text-gray-500">{formatJoined(c.joined)}</td>
                       {/* Actions */}
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-center gap-1.5">
@@ -270,7 +376,10 @@ export function CustomersPage() {
                       </td>
                     </motion.tr>
                   ))}
-                  {visible.length === 0 && (
+                  {loading && (
+                    <tr><td colSpan={7} className="px-5 py-12 text-center text-gray-400 text-xs">Loading customers from the database…</td></tr>
+                  )}
+                  {!loading && visible.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-5 py-12 text-center text-gray-400 text-xs">
                         No customers match your search.
@@ -293,7 +402,7 @@ export function CustomersPage() {
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie
-                  data={SEGMENT_DATA}
+                  data={segmentData}
                   cx="50%"
                   cy="50%"
                   innerRadius={46}
@@ -301,7 +410,7 @@ export function CustomersPage() {
                   paddingAngle={3}
                   dataKey="value"
                 >
-                  {SEGMENT_DATA.map((d) => (
+                  {segmentData.map((d) => (
                     <Cell key={d.name} fill={d.color} />
                   ))}
                 </Pie>
@@ -313,7 +422,7 @@ export function CustomersPage() {
             </ResponsiveContainer>
 
             <div className="space-y-2 mt-2">
-              {SEGMENT_DATA.map(d => (
+              {segmentData.map(d => (
                 <div key={d.name} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ background: d.color }} />
@@ -328,14 +437,17 @@ export function CustomersPage() {
       </motion.div>
 
       {/* Edit Modal */}
-      <Modal open={editOpen} onClose={() => setEditOpen(false)} title="Edit Customer" wide>
-        {selected && (
+      <Modal open={editOpen} onClose={() => !saving && setEditOpen(false)} title={isCreating ? "Add Customer" : "Edit Customer"} wide>
+        {editOpen && (
           <div className="space-y-4">
+            {pageError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{pageError}</p>}
             <div className="grid grid-cols-2 gap-4">
               <Field label="Full Name">
                 <input
                   className={inp}
-                  value={editForm.name ?? ""}
+                  required
+                  maxLength={100}
+                  value={editForm.name}
                   onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
                 />
               </Field>
@@ -343,7 +455,9 @@ export function CustomersPage() {
                 <input
                   className={inp}
                   type="email"
-                  value={editForm.email ?? ""}
+                  required
+                  maxLength={255}
+                  value={editForm.email}
                   onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
                 />
               </Field>
@@ -352,14 +466,32 @@ export function CustomersPage() {
               <Field label="Phone">
                 <input
                   className={inp}
-                  value={editForm.phone ?? ""}
+                  maxLength={30}
+                  value={editForm.phone}
                   onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
                 />
+              </Field>
+              <Field label="Gender">
+                <select className={inp} value={editForm.gender}
+                  onChange={e => setEditForm(f => ({ ...f, gender: e.target.value }))}>
+                  <option value="">Not specified</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="other">Other</option>
+                  <option value="prefer-not-to-say">Prefer not to say</option>
+                </select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Date of Birth">
+                <input type="date" className={inp} value={editForm.dateOfBirth}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setEditForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
               </Field>
               <Field label="Status">
                 <select
                   className={inp}
-                  value={editForm.status ?? "Active"}
+                  value={editForm.status}
                   onChange={e => setEditForm(f => ({ ...f, status: e.target.value as CustomerStatus }))}
                 >
                   <option value="Active">Active</option>
@@ -368,29 +500,26 @@ export function CustomersPage() {
               </Field>
             </div>
             <div className="flex items-center gap-2">
-              <input
-                id="vip-toggle"
-                type="checkbox"
-                checked={editForm.vip ?? false}
+              <input id="vip-toggle" type="checkbox" checked={editForm.vip}
                 onChange={e => setEditForm(f => ({ ...f, vip: e.target.checked }))}
-                className="w-4 h-4 rounded"
-                style={{ accentColor: G }}
-              />
+                className="w-4 h-4 rounded" style={{ accentColor: G }} />
               <label htmlFor="vip-toggle" className="text-xs font-black text-gray-600">VIP Member</label>
             </div>
             <div className="flex gap-3 pt-2">
               <button
+                disabled={saving}
                 onClick={() => setEditOpen(false)}
                 className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all"
               >
                 Cancel
               </button>
               <button
-                onClick={saveEdit}
-                className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all hover:opacity-90"
+                onClick={() => void saveEdit()}
+                disabled={saving}
+                className="flex-1 py-2.5 rounded-xl text-sm font-black text-white transition-all hover:opacity-90 disabled:opacity-60"
                 style={{ background: G }}
               >
-                Save Changes
+                {saving ? "Saving…" : isCreating ? "Create Customer" : "Save Changes"}
               </button>
             </div>
           </div>
@@ -403,7 +532,9 @@ export function CustomersPage() {
         onClose={() => setDeleteOpen(false)}
         onConfirm={confirmDelete}
         name={selected?.name}
-        title="Delete Customer"
+        title="Deactivate Customer"
+        message={`Deactivate "${selected?.name ?? ""}"? Their account and profile will remain in the database.`}
+        confirmLabel="Deactivate"
       />
     </div>
   );

@@ -7,7 +7,7 @@ import {
   DollarSign, BarChart3, Layers, Truck, Search as SearchIcon,
   FileText, Info, Star, Eye, ShoppingBag, ListChecks,
 } from "lucide-react";
-import { INIT_CATS, INIT_SUBCATS, INIT_BRANDS } from "./shared/data";
+import { INIT_BRANDS } from "./shared/data";
 import type { TaxRule } from "./shared/types";
 import { G, GD, fmt, disc, inp } from "./shared/constants";
 import { Field, Toggle } from "./shared/ui";
@@ -100,6 +100,24 @@ function textValue(value: unknown, fallback = "") {
 
 function numberText(value: unknown, fallback = "") {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : fallback;
+}
+
+type ProductCategoryOption = { id: number; name: string; slug: string; emoji: string; active: boolean };
+type ProductSubcategoryOption = { id: number; name: string; parent: string; active: boolean };
+
+function isProductCategoryOption(value: unknown): value is ProductCategoryOption {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "number" && typeof item.name === "string" &&
+    typeof item.slug === "string" && typeof item.emoji === "string" &&
+    typeof item.active === "boolean";
+}
+
+function isProductSubcategoryOption(value: unknown): value is ProductSubcategoryOption {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "number" && typeof item.name === "string" &&
+    typeof item.parent === "string" && typeof item.active === "boolean";
 }
 
 const SECTIONS = [
@@ -204,7 +222,7 @@ function UploadZone({
       className={`relative border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center cursor-pointer transition-all group hover:border-[#009966] hover:shadow-[0_0_0_4px_rgba(0,153,102,0.08)] overflow-hidden ${small ? "h-28" : "h-48"}`}
       onClick={() => ref.current?.click()}
     >
-      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+      <input ref={ref} type="file" accept="image/*,.jpg,.jpeg" className="hidden"
         onClick={e => e.stopPropagation()}
         onChange={e => {
           const f = e.target.files?.[0];
@@ -219,7 +237,7 @@ function UploadZone({
             <Upload size={16} />
           </div>
           {!small && <p className="text-xs font-bold">{label ?? "Click to upload"}</p>}
-          {!small && <p className="text-[10px] text-gray-400">PNG, JPG, WEBP — max 5MB</p>}
+          {!small && <p className="text-[10px] text-gray-400">Image files — max 5MB</p>}
         </div>
       )}
       {preview && (
@@ -248,16 +266,22 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
   // ── Media ───────────────────────────────────
   const [mainImg, setMainImg]     = useState<string>();
   const [mainImageFile, setMainImageFile] = useState<File | null>(null);
-  const [gallery, setGallery]     = useState<Array<string | undefined>>(Array(6).fill(undefined));
-  const [galleryFiles, setGalleryFiles] = useState<Array<File | undefined>>(Array(6).fill(undefined));
+  const [gallery, setGallery]     = useState<Array<string | undefined>>([]);
+  const [galleryFiles, setGalleryFiles] = useState<Array<File | undefined>>([]);
+  const [galleryDeleteIndexes, setGalleryDeleteIndexes] = useState<number[]>([]);
   const [videoUrl, setVideoUrl]   = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [existingVideoFileUrl, setExistingVideoFileUrl] = useState("");
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Organisation ────────────────────────────
   const [category, setCategory]   = useState("");
   const [subcat, setSubcat]       = useState("");
+  const [categories, setCategories] = useState<ProductCategoryOption[]>([]);
+  const [subcategories, setSubcategories] = useState<ProductSubcategoryOption[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesError, setCategoriesError] = useState("");
   const [brand, setBrand]         = useState("");
   const [sellerIds, setSellerIds] = useState<number[]>([]);
   const [tags, setTags]           = useState<string[]>([]);
@@ -393,8 +417,9 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
         setTags(Array.isArray(details.tags) ? details.tags.filter((item): item is string => typeof item === "string") : []);
         setMainImg(textValue(product.imageUrl) || undefined);
         setMainImageFile(null);
-        setGallery(Array.from({ length: 6 }, (_, index) => typeof rawGallery[index] === "string" ? rawGallery[index] as string : undefined));
-        setGalleryFiles(Array(6).fill(undefined));
+        setGallery(rawGallery.map((url): string | undefined => typeof url === "string" ? url : undefined));
+        setGalleryFiles(rawGallery.map(() => undefined));
+        setGalleryDeleteIndexes([]);
         setVideoUrl(textValue(product.videoUrl));
         setExistingVideoFileUrl(textValue(product.videoFileUrl));
         setVideoFile(null);
@@ -482,6 +507,42 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
 
   useEffect(() => {
     const controller = new AbortController();
+    async function loadCategories() {
+      setCategoriesLoading(true);
+      setCategoriesError("");
+      try {
+        const [categoryResponse, subcategoryResponse] = await Promise.all([
+          fetch("/api/admin/categories", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/admin/subcategories", { cache: "no-store", signal: controller.signal }),
+        ]);
+        const [categoryResult, subcategoryResult] = await Promise.all([
+          categoryResponse.json(),
+          subcategoryResponse.json(),
+        ]);
+        if (!categoryResponse.ok || !categoryResult.success || !Array.isArray(categoryResult.categories) ||
+            !categoryResult.categories.every(isProductCategoryOption)) {
+          throw new Error(typeof categoryResult.message === "string" ? categoryResult.message : "Failed to load product categories.");
+        }
+        if (!subcategoryResponse.ok || !subcategoryResult.success || !Array.isArray(subcategoryResult.subcategories) ||
+            !subcategoryResult.subcategories.every(isProductSubcategoryOption)) {
+          throw new Error(typeof subcategoryResult.message === "string" ? subcategoryResult.message : "Failed to load product subcategories.");
+        }
+        setCategories(categoryResult.categories);
+        setSubcategories(subcategoryResult.subcategories);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setCategoriesError(error instanceof Error ? error.message : "Failed to load product categories.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setCategoriesLoading(false);
+      }
+    }
+    void loadCategories();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
     async function loadTaxRules() {
       setTaxRulesLoading(true);
       setTaxRulesError("");
@@ -526,10 +587,10 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
     : 0;
   const priceWithTax = Math.round((sellN + taxAmount + Number.EPSILON) * 100) / 100;
 
-  const filteredSubcats = INIT_SUBCATS.filter(s => s.parent === category);
+  const filteredSubcats = subcategories.filter(s => s.parent === category);
 
   const autoSku = () => {
-    const cat = INIT_CATS.find(c => c.name === category);
+    const cat = categories.find(c => c.name === category);
     const bnd = INIT_BRANDS.find(b => b.name === brand);
     const slug = name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     setSku(`${cat?.slug?.slice(0,3).toUpperCase() ?? "PRD"}-${bnd?.slug?.slice(0,3).toUpperCase() ?? "GEN"}-${slug || "ITEM"}`.replace(/--/g, "-"));
@@ -558,18 +619,18 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
   const toggleSeller = (id: number) =>
     setSellerIds(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
 
-  const handleGallery = (i: number, f: File) => {
-    const url = URL.createObjectURL(f);
-    setGallery(prev => {
-      const n = [...prev];
-      n[i] = url;
-      return n;
-    });
-    setGalleryFiles(prev => {
-      const n = [...prev];
-      n[i] = f;
-      return n;
-    });
+  const addGalleryFiles = (files: File[]) => {
+    if (!files.length) return;
+    setGallery(current => [...current, ...files.map(file => URL.createObjectURL(file))]);
+    setGalleryFiles(current => [...current, ...files]);
+  };
+
+  const removeGalleryImage = (index: number) => {
+    if (gallery[index] && !galleryFiles[index]) {
+      setGalleryDeleteIndexes(current => current.includes(index) ? current : [...current, index]);
+    }
+    setGallery(current => current.map((image, imageIndex) => imageIndex === index ? undefined : image));
+    setGalleryFiles(current => current.map((file, fileIndex) => fileIndex === index ? undefined : file));
   };
 
   const saveProduct = async (publish: boolean) => {
@@ -636,6 +697,9 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
     const formData = new FormData();
     formData.append("product", JSON.stringify(payload));
     if (mainImageFile) formData.append("mainImage", mainImageFile);
+    if (productId && galleryDeleteIndexes.length) {
+      formData.append("galleryDeleteIndexes", JSON.stringify(galleryDeleteIndexes));
+    }
     galleryFiles.forEach((file, index) => {
       if (file) formData.append(`galleryImage_${index}`, file);
     });
@@ -650,11 +714,22 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
       if (!response.ok || !result.success) {
         throw new Error(typeof result.message === "string" ? result.message : "Could not save the product.");
       }
+      const savedProduct = recordValue(result.product);
+      if (Array.isArray(savedProduct.galleryImages)) {
+        const savedGallery = savedProduct.galleryImages.map((url): string | undefined =>
+          typeof url === "string" ? url : undefined
+        );
+        setGallery(savedGallery);
+        setGalleryFiles(savedGallery.map(() => undefined));
+        setGalleryDeleteIndexes([]);
+      }
       setPublished(publish);
       setStoredStatus(payload.status);
       setFormMessage({
         type: "success",
-        text: productId
+        text: Array.isArray(result.cleanupWarnings) && result.cleanupWarnings.length
+          ? `${productId ? "Product updated successfully." : publish ? "Product published successfully." : "Product draft saved successfully."} ${result.cleanupWarnings.join(" ")}`
+          : productId
           ? "Product updated successfully."
           : publish ? "Product published successfully." : "Product draft saved successfully.",
       });
@@ -922,17 +997,48 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                 />
               </Field>
 
-              <Field label="Gallery Images" hint="Up to 6 additional photos">
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {gallery.map((prev, i) => (
-                    <UploadZone
-                      key={i}
-                      preview={prev}
-                      onFile={f => handleGallery(i, f)}
-                      small
-                    />
-                  ))}
-                </div>
+              <Field label="Gallery Images" hint={`${gallery.filter(Boolean).length} images selected · You can select multiple files at once`}>
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*,.jpg,.jpeg"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    addGalleryFiles(Array.from(e.target.files ?? []));
+                    e.target.value = "";
+                  }}
+                />
+                {gallery.some(Boolean) ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                    {gallery.map((preview, index) => preview ? (
+                      <div key={index} className="relative group aspect-square overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+                        <img src={preview} alt={`Gallery image ${index + 1}`} className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          aria-label={`Remove gallery image ${index + 1}`}
+                          onClick={() => removeGalleryImage(index)}
+                          className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : null)}
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-xs text-gray-400">
+                    No gallery images selected yet.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="mt-3 flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold text-gray-600 transition-colors hover:border-[#009966] hover:text-[#009966]"
+                >
+                  <Plus size={14} />
+                  Add gallery images
+                </button>
+                <p className="mt-2 text-[10px] text-gray-400">Image files · maximum 5 MB per image</p>
               </Field>
 
               <Field label="Product Video URL" hint="YouTube, Vimeo, MP4, or WebM">
@@ -987,6 +1093,11 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
             {/* 03 Organisation ─────────────────── */}
             <SectionCard id="section-03" num="03" title="Organisation" icon={Grid3x3}>
               <div className="grid sm:grid-cols-3 gap-4">
+                {categoriesError && (
+                  <p role="alert" className="sm:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {categoriesError}
+                  </p>
+                )}
                 <Field label="Category" required>
                   <select
                     value={category}
@@ -996,10 +1107,11 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                       setTaxRuleId("");
                     }}
                     className={inp}
+                    disabled={categoriesLoading}
                   >
-                    <option value="">Select category…</option>
-                    {category && !INIT_CATS.some(item => item.name === category) && <option key={`current-${category}`} value={category}>{category}</option>}
-                    {INIT_CATS.filter(c => c.active).map(c => (
+                    <option value="">{categoriesLoading ? "Loading categories…" : "Select category…"}</option>
+                    {category && !categories.some(item => item.name === category) && <option key={`current-${category}`} value={category}>{category}</option>}
+                    {categories.filter(c => c.active || c.name === category).map(c => (
                       <option key={c.id} value={c.name}>{c.emoji} {c.name}</option>
                     ))}
                   </select>
@@ -1356,7 +1468,7 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                                     const imgRef = React.createRef<HTMLInputElement>();
                                     return (
                                       <div key={i} className="relative group">
-                                        <input ref={imgRef} type="file" accept="image/*" className="hidden"
+                                        <input ref={imgRef} type="file" accept="image/*,.jpg,.jpeg" className="hidden"
                                           onChange={e => { const f = e.target.files?.[0]; if (f) addVariantImg(v.id, i, f); }} />
                                         <div
                                           onClick={() => imgRef.current?.click()}

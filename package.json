@@ -8,12 +8,15 @@
     "start": "next start",
     "lint": "next lint",
     "db:setup": "node --env-file=.env scripts/setup-db.mjs",
+    "db:users": "node --env-file=.env scripts/setup-users-db.mjs",
+    "db:addresses": "npm run db:users && node --env-file=.env scripts/setup-addresses-db.mjs",
     "db:group-categories": "node --env-file=.env scripts/setup-group-categories.mjs",
     "db:categories": "npm run db:group-categories && node --env-file=.env scripts/setup-categories.mjs",
     "db:subcategories": "npm run db:categories && node --env-file=.env scripts/setup-subcategories.mjs",
     "db:brands": "node --env-file=.env scripts/setup-brands.mjs",
     "db:products": "node --env-file=.env scripts/setup-products.mjs",
     "db:taxes": "node --env-file=.env scripts/setup-taxes.mjs",
+    "db:banners": "node --env-file=.env scripts/setup-banners.mjs",
     "admin:add": "node --env-file=.env scripts/create-admin.mjs"
   },
   "dependencies": {

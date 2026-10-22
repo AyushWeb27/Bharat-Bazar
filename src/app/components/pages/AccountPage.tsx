@@ -24,10 +24,45 @@ const SIDEBAR_ITEMS = [
   { id: "danger",    icon: AlertTriangle,  label: "Danger Zone",        emoji: "⚠️" },
 ];
 
-const ADDRESSES = [
-  { id: 1, tag: "Home",   name: "Rahul Sharma", line: "12, MG Road, Indiranagar", city: "Bengaluru", pin: "560038", phone: "9876543210", default: true  },
-  { id: 2, tag: "Office", name: "Rahul Sharma", line: "45, Linking Road",         city: "Mumbai",    pin: "400050", phone: "9876543210", default: false },
-];
+type SavedAddress = {
+  id: number;
+  label: string;
+  recipient: string;
+  phone: string;
+  line1: string;
+  line2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  isDefault: boolean;
+};
+
+type AddressForm = Omit<SavedAddress, "id">;
+
+const EMPTY_ADDRESS: AddressForm = {
+  label: "Home",
+  recipient: "",
+  phone: "",
+  line1: "",
+  line2: "",
+  city: "",
+  state: "",
+  postalCode: "",
+  country: "India",
+  isDefault: false,
+};
+
+function isSavedAddress(value: unknown): value is SavedAddress {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const address = value as Record<string, unknown>;
+  return typeof address.id === "number" && typeof address.label === "string" &&
+    typeof address.recipient === "string" && typeof address.phone === "string" &&
+    typeof address.line1 === "string" && typeof address.line2 === "string" &&
+    typeof address.city === "string" && typeof address.state === "string" &&
+    typeof address.postalCode === "string" && typeof address.country === "string" &&
+    typeof address.isDefault === "boolean";
+}
 
 const PAYMENTS_LIST = [
   { type: "upi",  label: "rahul@okicici",  sub: "UPI ID",      icon: "📱", color: "#6366f1" },
@@ -87,6 +122,14 @@ export function AccountPage({ setPage, dark, setDark }: {
   const [imagePreview, setImagePreview] = useState("");
   const [imageMessage, setImageMessage] = useState("");
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [addresses, setAddresses] = useState<SavedAddress[]>([]);
+  const [addressesLoading, setAddressesLoading] = useState(false);
+  const [addressSaving, setAddressSaving] = useState(false);
+  const [addressError, setAddressError] = useState("");
+  const [addressFormOpen, setAddressFormOpen] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
+  const [addressToDelete, setAddressToDelete] = useState<SavedAddress | null>(null);
+  const [addressForm, setAddressForm] = useState<AddressForm>(EMPTY_ADDRESS);
 
   // Security
   const [showPass,     setShowPass]     = useState(false);
@@ -114,6 +157,139 @@ export function AccountPage({ setPage, dark, setDark }: {
     setImagePreview(previewUrl);
     return () => URL.revokeObjectURL(previewUrl);
   }, [selectedImage]);
+
+  useEffect(() => {
+    if (activeTab !== "addresses") return;
+    if (!user) {
+      setAddresses([]);
+      setAddressesLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    async function loadAddresses() {
+      setAddressesLoading(true);
+      setAddressError("");
+      try {
+        const response = await fetch("/api/auth/addresses", {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" || !("success" in result) ||
+            result.success !== true || !("addresses" in result) || !Array.isArray(result.addresses) ||
+            !result.addresses.every(isSavedAddress)) {
+          const message = result && typeof result === "object" && "message" in result && typeof result.message === "string"
+            ? result.message : "Failed to load saved addresses.";
+          throw new Error(message);
+        }
+        setAddresses(result.addresses);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load saved addresses:", error);
+          setAddressError(error instanceof Error ? error.message : "Failed to load saved addresses.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setAddressesLoading(false);
+      }
+    }
+    void loadAddresses();
+    return () => controller.abort();
+  }, [activeTab, user]);
+
+  const loadAddresses = async () => {
+    setAddressesLoading(true);
+    setAddressError("");
+    try {
+      const response = await fetch("/api/auth/addresses", { credentials: "same-origin", cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok || !result.success || !Array.isArray(result.addresses) || !result.addresses.every(isSavedAddress)) {
+        throw new Error(result.message || "Failed to load saved addresses.");
+      }
+      setAddresses(result.addresses);
+    } catch (error) {
+      console.error("Failed to refresh saved addresses:", error);
+      setAddressError(error instanceof Error ? error.message : "Failed to load saved addresses.");
+    } finally {
+      setAddressesLoading(false);
+    }
+  };
+
+  const openAddressForm = (address?: SavedAddress) => {
+    setAddressError("");
+    setEditingAddressId(address?.id ?? null);
+    setAddressForm(address ? {
+      label: address.label,
+      recipient: address.recipient,
+      phone: address.phone,
+      line1: address.line1,
+      line2: address.line2,
+      city: address.city,
+      state: address.state,
+      postalCode: address.postalCode,
+      country: address.country,
+      isDefault: address.isDefault,
+    } : { ...EMPTY_ADDRESS, recipient: name || user?.name || "", phone: phone || user?.phone || "" });
+    setAddressFormOpen(true);
+  };
+
+  const saveAddress = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAddressSaving(true);
+    setAddressError("");
+    try {
+      const response = await fetch("/api/auth/addresses", {
+        method: editingAddressId ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addressForm, ...(editingAddressId ? { id: editingAddressId } : {}) }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to save address.");
+      setAddressFormOpen(false);
+      setEditingAddressId(null);
+      await loadAddresses();
+    } catch (error) {
+      setAddressError(error instanceof Error ? error.message : "Failed to save address.");
+    } finally {
+      setAddressSaving(false);
+    }
+  };
+
+  const setDefaultAddress = async (address: SavedAddress) => {
+    setAddressError("");
+    try {
+      const response = await fetch("/api/auth/addresses", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...address, isDefault: true }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to update default address.");
+      await loadAddresses();
+    } catch (error) {
+      setAddressError(error instanceof Error ? error.message : "Failed to update default address.");
+    }
+  };
+
+  const removeAddress = async () => {
+    if (!addressToDelete) return;
+    setAddressError("");
+    try {
+      const response = await fetch(`/api/auth/addresses?id=${addressToDelete.id}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Failed to remove address.");
+      setAddressToDelete(null);
+      await loadAddresses();
+    } catch (error) {
+      setAddressError(error instanceof Error ? error.message : "Failed to remove address.");
+      setAddressToDelete(null);
+    }
+  };
 
   const inputBase = "w-full bg-muted border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all";
 
@@ -338,40 +514,77 @@ export function AccountPage({ setPage, dark, setDark }: {
       case "addresses": return (
         <div className="space-y-4">
           <Section title="Saved Addresses">
-            {ADDRESSES.map(addr => (
+            {addressError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{addressError}</p>}
+            {!user ? (
+              <p className="rounded-2xl border border-border bg-muted/40 px-4 py-8 text-center text-sm text-muted-foreground">
+                Sign in to view and manage your saved addresses.
+              </p>
+            ) : addressesLoading ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <Loader2 size={16} className="animate-spin" /> Loading your saved addresses…
+              </div>
+            ) : addresses.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border px-4 py-8 text-center">
+                <MapPin size={24} className="mx-auto text-muted-foreground" />
+                <p className="mt-2 text-sm font-bold text-foreground">No saved addresses yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">Add an address to make checkout faster.</p>
+              </div>
+            ) : addresses.map(addr => (
               <motion.div key={addr.id} whileHover={{ y: -2, boxShadow: `0 8px 20px -4px ${G}18` }}
                 className="bg-muted/50 border border-border rounded-2xl p-4 relative">
-                {addr.default && (
+                {addr.isDefault && (
                   <span className="absolute top-3 right-3 text-[9px] font-black px-2 py-0.5 rounded-full text-white" style={{ background: G }}>Default</span>
                 )}
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm" style={{ background: `${G}18` }}>
-                    {addr.tag === "Home" ? "🏠" : "🏢"}
+                    {addr.label.toLowerCase() === "home" ? "🏠" : addr.label.toLowerCase() === "office" ? "🏢" : "📍"}
                   </div>
                   <div className="flex-1 min-w-0 pr-12">
-                    <p className="text-xs font-black text-foreground">{addr.tag}</p>
-                    <p className="text-sm font-semibold text-foreground mt-0.5">{addr.name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{addr.line}, {addr.city} — {addr.pin}</p>
-                    <p className="text-xs text-muted-foreground">📞 +91 {addr.phone}</p>
+                    <p className="text-xs font-black text-foreground">{addr.label}</p>
+                    <p className="text-sm font-semibold text-foreground mt-0.5">{addr.recipient}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {[addr.line1, addr.line2].filter(Boolean).join(", ")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {addr.city}, {addr.state} — {addr.postalCode}, {addr.country}
+                    </p>
+                    <p className="text-xs text-muted-foreground">📞 {addr.phone}</p>
                   </div>
                 </div>
-                <div className="flex gap-2 mt-3">
-                  <button className="text-xs font-bold px-3 py-1.5 rounded-lg border border-border hover:border-[#009966] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button type="button" onClick={() => openAddressForm(addr)}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg border border-border hover:border-[#009966] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
                     <Edit3 size={11} /> Edit
                   </button>
-                  {!addr.default && (
-                    <button className="text-xs font-bold px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-1">
+                  {!addr.isDefault && (
+                    <>
+                      <button type="button" onClick={() => void setDefaultAddress(addr)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg border border-border hover:border-[#009966] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                        <Check size={11} /> Set as default
+                      </button>
+                      <button type="button" onClick={() => setAddressToDelete(addr)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-1">
+                        <Trash2 size={11} /> Remove
+                      </button>
+                    </>
+                  )}
+                  {addr.isDefault && (
+                    <button type="button" onClick={() => setAddressToDelete(addr)}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-1">
                       <Trash2 size={11} /> Remove
                     </button>
                   )}
                 </div>
               </motion.div>
             ))}
-            <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed text-sm font-bold transition-colors hover:border-[#009966] text-muted-foreground hover:text-foreground"
-              style={{ borderColor: "var(--border)" }}>
-              <Plus size={16} /> Add New Address
-            </motion.button>
+            {user && (
+              <motion.button type="button" whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
+                onClick={() => openAddressForm()}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed text-sm font-bold transition-colors hover:border-[#009966] text-muted-foreground hover:text-foreground"
+                style={{ borderColor: "var(--border)" }}>
+                <Plus size={16} /> Add New Address
+              </motion.button>
+            )}
           </Section>
         </div>
       );
@@ -740,6 +953,128 @@ export function AccountPage({ setPage, dark, setDark }: {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {addressFormOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget && !addressSaving) setAddressFormOpen(false);
+          }}>
+          <form onSubmit={saveAddress} role="dialog" aria-modal="true" aria-labelledby="address-form-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-2xl md:p-6">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="address-form-title" className="text-lg font-black text-foreground">
+                  {editingAddressId ? "Edit Address" : "Add New Address"}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">Your saved address is private to your account.</p>
+              </div>
+              <button type="button" aria-label="Close address form" disabled={addressSaving}
+                onClick={() => setAddressFormOpen(false)} className="rounded-lg px-2 py-1 text-muted-foreground hover:bg-muted">✕</button>
+            </div>
+            {addressError && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{addressError}</p>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="text-xs font-bold text-muted-foreground">
+                Address label
+                <select required value={addressForm.label}
+                  onChange={event => setAddressForm(form => ({ ...form, label: event.target.value }))}
+                  className={`${inputBase} mt-1.5`}>
+                  <option value="Home">Home</option>
+                  <option value="Office">Office</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+              <label className="text-xs font-bold text-muted-foreground">
+                Recipient name
+                <input required maxLength={100} value={addressForm.recipient}
+                  onChange={event => setAddressForm(form => ({ ...form, recipient: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="name" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground">
+                Phone number
+                <input required type="tel" maxLength={20} value={addressForm.phone}
+                  onChange={event => setAddressForm(form => ({ ...form, phone: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="tel" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground">
+                Postal / PIN code
+                <input required maxLength={12} value={addressForm.postalCode}
+                  onChange={event => setAddressForm(form => ({ ...form, postalCode: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="postal-code" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground sm:col-span-2">
+                Address line 1
+                <input required maxLength={200} value={addressForm.line1}
+                  onChange={event => setAddressForm(form => ({ ...form, line1: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="address-line1" placeholder="House, flat, street, area" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground sm:col-span-2">
+                Address line 2 <span className="font-normal">(optional)</span>
+                <input maxLength={200} value={addressForm.line2}
+                  onChange={event => setAddressForm(form => ({ ...form, line2: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="address-line2" placeholder="Landmark, building, etc." />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground">
+                City
+                <input required maxLength={100} value={addressForm.city}
+                  onChange={event => setAddressForm(form => ({ ...form, city: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="address-level2" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground">
+                State / Province
+                <input required maxLength={100} value={addressForm.state}
+                  onChange={event => setAddressForm(form => ({ ...form, state: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="address-level1" />
+              </label>
+              <label className="text-xs font-bold text-muted-foreground sm:col-span-2">
+                Country
+                <input required maxLength={100} value={addressForm.country}
+                  onChange={event => setAddressForm(form => ({ ...form, country: event.target.value }))}
+                  className={`${inputBase} mt-1.5`} autoComplete="country-name" />
+              </label>
+            </div>
+            <label className="mt-4 flex items-center gap-2 text-xs font-bold text-foreground">
+              <input type="checkbox" checked={addressForm.isDefault}
+                onChange={event => setAddressForm(form => ({ ...form, isDefault: event.target.checked }))}
+                className="h-4 w-4 rounded" style={{ accentColor: G }} />
+              Set as my default address
+            </label>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" disabled={addressSaving} onClick={() => setAddressFormOpen(false)}
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-60">
+                Cancel
+              </button>
+              <button type="submit" disabled={addressSaving}
+                className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black text-white disabled:opacity-60"
+                style={{ background: `linear-gradient(to right, ${GD}, ${G})` }}>
+                {addressSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                {addressSaving ? "Saving…" : editingAddressId ? "Save Address" : "Add Address"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {addressToDelete && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4">
+          <div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl">
+            <h2 className="text-base font-black text-foreground">Remove saved address?</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Remove the {addressToDelete.label.toLowerCase()} address for {addressToDelete.recipient}?
+              {addressToDelete.isDefault ? " The most recently saved remaining address will become the default." : ""}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAddressToDelete(null)}
+                className="rounded-xl border border-border px-4 py-2 text-sm font-bold text-muted-foreground hover:bg-muted">
+                Cancel
+              </button>
+              <button type="button" onClick={() => void removeAddress()}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-600">
+                Remove Address
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

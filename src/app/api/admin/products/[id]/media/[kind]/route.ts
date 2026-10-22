@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     }
     if (
       kind === "gallery-image" &&
-      (!Number.isSafeInteger(index) || (index ?? -1) < 0 || (index ?? 6) > 5)
+      (!Number.isSafeInteger(index) || (index ?? -1) < 0 || (index ?? 10001) > 10000)
     ) return failure("Invalid gallery image index.", 400);
 
     const rows = await sql`
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     const contentType = object.ContentType || "application/octet-stream";
     const allowedTypes = kind === "video"
       ? ["video/mp4", "video/webm"]
-      : ["image/jpeg", "image/png", "image/webp"];
+      : ["image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif"];
     if (!allowedTypes.includes(contentType)) return failure("Product media has an unsupported format.", 415);
 
     const bytes = await object.Body.transformToByteArray();

@@ -54,9 +54,9 @@ export function Modal({ open, onClose, title, children, wide }: {
   );
 }
 
-export function DeleteConfirm({ open, onClose, onConfirm, name, title, message }: {
+export function DeleteConfirm({ open, onClose, onConfirm, name, title, message, confirmLabel = "Delete" }: {
   open: boolean; onClose: () => void; onConfirm: () => void;
-  name?: string; title?: string; message?: string;
+  name?: string; title?: string; message?: string; confirmLabel?: string;
 }) {
   const heading = title ?? "Confirm Delete";
   const body    = message ?? (name ? `Delete "${name}"?` : "Are you sure?");
@@ -70,7 +70,7 @@ export function DeleteConfirm({ open, onClose, onConfirm, name, title, message }
         </div>
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">Cancel</button>
-          <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-red-500 hover:bg-red-600 transition-all">Delete</button>
+          <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-red-500 hover:bg-red-600 transition-all">{confirmLabel}</button>
         </div>
       </div>
     </Modal>

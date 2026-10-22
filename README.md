@@ -27,6 +27,10 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    npm run db:group-categories
    ```
 
+   For the database-backed Admin Customers page, also run `npm run db:users`. This creates or updates the customer `users` table, including gender, date of birth, and VIP fields.
+
+   Run `npm run db:addresses` to create the customer-linked `user_addresses` table for saved delivery addresses.
+
 4. **Create and seed the admin categories table in Neon**:
    ```bash
    npm run db:categories
@@ -57,7 +61,13 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    ```
    Run this after `npm run db:products`. The setup seeds the supplied GST, CGST, SGST, UTGST, IGST, and Compensation Cess rules. Variable-rate rules retain their descriptive rate label and stay unavailable for product calculations until a numeric rate is configured. Product selling prices are stored before tax, with the selected active tax rule rate and the calculated tax-inclusive price stored separately. Tax category/scope labels describe tax applicability; admins must choose the correct rule for the sale.
 
-9. **Build for production**:
+9. **Create the store banner table in Neon**:
+   ```bash
+   npm run db:banners
+   ```
+   Create an S3-compatible object storage bucket named `banners` and configure `AWS_BANNERS_BUCKET_NAME=banners` with the storage credentials above. Active hero banners with valid display dates appear in the storefront home slider.
+
+10. **Build for production**:
    ```bash
    npm run build
    npm run start

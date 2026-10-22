@@ -16,12 +16,68 @@ export const BRAND_IMAGE_BUCKET_NAME =
   process.env.AWS_BRANDS_IMAGES_BUCKET_NAME || "brands-images";
 export const PRODUCT_MEDIA_BUCKET_NAME =
   process.env.AWS_PRODUCTS_MEDIA_BUCKET_NAME || "product-main-image-video";
+export const BANNERS_BUCKET_NAME = process.env.AWS_BANNERS_BUCKET_NAME || "banners";
+export const MAX_PRODUCT_GALLERY_INDEX = 10000;
+
+export async function saveBannerImage(bannerId: number, body: Uint8Array, contentType: string) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/image`,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: "public, max-age=300",
+  }));
+}
+
+export async function saveBannerProductImage(bannerId: number, body: Uint8Array, contentType: string) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/product-image`,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: "public, max-age=300",
+  }));
+}
+
+export async function loadBannerImage(bannerId: number) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  return client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/image`,
+  }));
+}
+
+export async function loadBannerProductImage(bannerId: number) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  return client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/product-image`,
+  }));
+}
+
+export async function deleteBannerImage(bannerId: number) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  await client.send(new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/image`,
+  }));
+}
+
+export async function deleteBannerProductImage(bannerId: number) {
+  const { bucket, client } = getProfileStorageConfig(BANNERS_BUCKET_NAME);
+  await client.send(new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: `banners/${bannerId}/product-image`,
+  }));
+}
 
 export type ProductMediaKind = "main-image" | "gallery-image" | "video";
 
 function getProductMediaKey(productId: number, kind: ProductMediaKind, index?: number) {
   if (kind === "gallery-image") {
-    if (!Number.isSafeInteger(index) || (index ?? -1) < 0 || (index ?? 6) > 5) {
+    if (!Number.isSafeInteger(index) || (index ?? -1) < 0 || (index ?? MAX_PRODUCT_GALLERY_INDEX + 1) > MAX_PRODUCT_GALLERY_INDEX) {
       throw new Error("A valid gallery image index is required.");
     }
     return `products/${productId}/gallery-${index}`;
@@ -127,6 +183,38 @@ export function detectProfileImageType(bytes: Uint8Array): string | null {
   ) {
     return "image/webp";
   }
+  return null;
+}
+
+export const SUPPORTED_BANNER_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/bmp",
+  "image/tiff",
+  "image/avif",
+]);
+
+export function detectBannerImageType(bytes: Uint8Array): string | null {
+  const commonType = detectProfileImageType(bytes);
+  if (commonType) return commonType;
+  if (
+    bytes.length >= 6 &&
+    (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]) === "GIF87a" ||
+      String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]) === "GIF89a")
+  ) return "image/gif";
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
+  if (
+    bytes.length >= 8 &&
+    ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) ||
+      (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a))
+  ) return "image/tiff";
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp" &&
+    ["avif", "avis"].includes(String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]))
+  ) return "image/avif";
   return null;
 }
 

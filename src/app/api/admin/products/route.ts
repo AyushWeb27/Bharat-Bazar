@@ -12,6 +12,8 @@ export const runtime = "nodejs";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
+const MAX_GALLERY_IMAGES = 100;
+const MAX_GALLERY_INDEX = 10000;
 
 type ProductInput = {
   name: string;
@@ -176,6 +178,28 @@ function mapAdminProduct(row: Record<string, unknown>) {
   };
 }
 
+function detectProductImageType(bytes: Uint8Array): string | null {
+  const knownType = detectProfileImageType(bytes);
+  if (knownType) return knownType;
+  if (
+    bytes.length >= 6 &&
+    (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]) === "GIF87a" ||
+      String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]) === "GIF89a")
+  ) return "image/gif";
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
+  if (
+    bytes.length >= 8 &&
+    ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) ||
+      (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a))
+  ) return "image/tiff";
+  if (
+    bytes.length >= 12 &&
+    String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]) === "ftyp" &&
+    ["avif", "avis"].includes(String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]))
+  ) return "image/avif";
+  return null;
+}
+
 async function readImage(formData: FormData, field: string) {
   const file = formData.get(field);
   if (file === null) return null;
@@ -184,9 +208,9 @@ async function readImage(formData: FormData, field: string) {
     throw new Error("Product images must be between 1 byte and 5 MB.");
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const contentType = detectProfileImageType(bytes);
+  const contentType = detectProductImageType(bytes);
   if (!contentType || (file.type && file.type !== contentType)) {
-    throw new Error("Use a valid JPEG, PNG, or WebP image.");
+    throw new Error("Use a valid image file (JPEG, PNG, WebP, GIF, BMP, TIFF, or AVIF).");
   }
   return { bytes, contentType };
 }
@@ -204,6 +228,45 @@ async function readVideo(formData: FormData) {
     throw new Error("Use a valid MP4 or WebM video.");
   }
   return { bytes, contentType };
+}
+
+async function readGallery(formData: FormData) {
+  const gallery: Array<{ index: number; bytes: Uint8Array; contentType: string }> = [];
+  const indexes = new Set<number>();
+  const entries: Array<[string, FormDataEntryValue]> = [];
+  formData.forEach((value, field) => entries.push([field, value]));
+  for (const [field, value] of entries) {
+    if (!field.startsWith("galleryImage_")) continue;
+    const indexText = field.slice("galleryImage_".length);
+    const index = Number(indexText);
+    if (!/^\d+$/.test(indexText) || !Number.isSafeInteger(index) || index > MAX_GALLERY_INDEX || indexes.has(index)) {
+      throw new Error("Invalid product gallery image index.");
+    }
+    if (!(value instanceof File)) throw new Error("Invalid product gallery image upload.");
+    if (gallery.length >= MAX_GALLERY_IMAGES) {
+      throw new Error(`A product can have up to ${MAX_GALLERY_IMAGES} gallery images.`);
+    }
+    const image = await readImage(formData, field);
+    if (image) gallery.push({ index, ...image });
+    indexes.add(index);
+  }
+  return gallery.sort((left, right) => left.index - right.index);
+}
+
+function readGalleryDeleteIndexes(formData: FormData): number[] | null {
+  const value = formData.get("galleryDeleteIndexes");
+  if (value === null) return [];
+  if (typeof value !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || !parsed.every(index =>
+    typeof index === "number" && Number.isSafeInteger(index) && index >= 0 && index <= MAX_GALLERY_INDEX
+  )) return null;
+  return Array.from(new Set(parsed as number[]));
 }
 
 export async function GET(req: NextRequest) {
@@ -243,7 +306,7 @@ export async function GET(req: NextRequest) {
           barcode: String(row.barcode || ""),
           videoUrl: String(row.video_url || ""),
           videoFileUrl: row.video_file_url ? String(row.video_file_url) : "",
-          galleryImages: Array.isArray(galleryImages) ? galleryImages : Array(6).fill(null),
+          galleryImages: Array.isArray(galleryImages) ? galleryImages : [],
           details: isRecord(details) ? details : {},
           isPopular: Boolean(row.is_popular),
           isDeal: Boolean(row.is_deal),
@@ -295,14 +358,11 @@ export async function POST(req: NextRequest) {
 
   let mainImage: Awaited<ReturnType<typeof readImage>>;
   let video: Awaited<ReturnType<typeof readVideo>>;
-  const gallery: Array<{ index: number; bytes: Uint8Array; contentType: string }> = [];
+  let gallery: Array<{ index: number; bytes: Uint8Array; contentType: string }>;
   try {
     mainImage = await readImage(formData, "mainImage");
     video = await readVideo(formData);
-    for (let index = 0; index < 6; index += 1) {
-      const image = await readImage(formData, `galleryImage_${index}`);
-      if (image) gallery.push({ index, ...image });
-    }
+    gallery = await readGallery(formData);
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Invalid media upload.", 400);
   }
@@ -370,7 +430,7 @@ export async function POST(req: NextRequest) {
       mainImageUrl = `/api/admin/products/${productId}/media/main-image`;
     }
 
-    const galleryUrls: Array<string | null> = Array(6).fill(null);
+    const galleryUrls: Array<string | null> = [];
     for (const image of gallery) {
       await saveProductMedia(productId, "gallery-image", image.bytes, image.contentType, image.index);
       savedMedia.push({ kind: "gallery-image", index: image.index });
@@ -395,7 +455,13 @@ export async function POST(req: NextRequest) {
                 stock, status, featured, main_image_url, gallery_images, video_file_url,
                 tax_rule_id, tax_rate, tax_amount, price_with_tax
     `;
-    return NextResponse.json({ success: true, product: updated[0] }, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      product: {
+        ...updated[0],
+        galleryImages: galleryUrls,
+      },
+    }, { status: 201 });
   } catch (error) {
     if (productId) {
       for (const media of savedMedia) {
@@ -460,17 +526,16 @@ export async function PUT(req: NextRequest) {
 
   let mainImage: Awaited<ReturnType<typeof readImage>>;
   let video: Awaited<ReturnType<typeof readVideo>>;
-  const gallery: Array<{ index: number; bytes: Uint8Array; contentType: string }> = [];
+  let gallery: Array<{ index: number; bytes: Uint8Array; contentType: string }>;
   try {
     mainImage = await readImage(formData, "mainImage");
     video = await readVideo(formData);
-    for (let index = 0; index < 6; index += 1) {
-      const image = await readImage(formData, `galleryImage_${index}`);
-      if (image) gallery.push({ index, ...image });
-    }
+    gallery = await readGallery(formData);
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "Invalid media upload.", 400);
   }
+  const galleryDeleteIndexes = readGalleryDeleteIndexes(formData);
+  if (!galleryDeleteIndexes) return errorResponse("Invalid product gallery removals.", 400);
   if (
     product.status !== "draft" &&
     (!product.shortDescription || !product.category || !product.subcategory ||
@@ -502,11 +567,24 @@ export async function PUT(req: NextRequest) {
     const taxAmount = Math.round((((product.sellingPrice ?? 0) * taxRate / 100) + Number.EPSILON) * 100) / 100;
     const priceWithTax = Math.round((((product.sellingPrice ?? 0) + taxAmount) + Number.EPSILON) * 100) / 100;
 
-    if (mainImage) await saveProductMedia(rawProduct.id, "main-image", mainImage.bytes, mainImage.contentType);
     let galleryImages: unknown = existing.gallery_images;
     if (typeof galleryImages === "string") galleryImages = JSON.parse(galleryImages);
-    const galleryUrls: Array<string | null> = Array.isArray(galleryImages) ? galleryImages.slice(0, 6) : Array(6).fill(null);
-    while (galleryUrls.length < 6) galleryUrls.push(null);
+    const galleryUrls: Array<string | null> = Array.isArray(galleryImages) ? [...galleryImages] : [];
+    const removedIndexes = new Set(galleryDeleteIndexes);
+    if (galleryDeleteIndexes.some(index => !galleryUrls[index])) {
+      return errorResponse("One or more selected gallery images no longer exist.", 400);
+    }
+    for (const index of galleryDeleteIndexes) galleryUrls[index] = null;
+    if (galleryUrls.filter(Boolean).length + gallery.length > MAX_GALLERY_IMAGES) {
+      return errorResponse(`A product can have up to ${MAX_GALLERY_IMAGES} gallery images.`, 400);
+    }
+    if (gallery.some(image => removedIndexes.has(image.index))) {
+      return errorResponse("A gallery image cannot be removed and replaced in the same request.", 400);
+    }
+    if (gallery.some(image => galleryUrls[image.index])) {
+      return errorResponse("A gallery image index is already in use.", 400);
+    }
+    if (mainImage) await saveProductMedia(rawProduct.id, "main-image", mainImage.bytes, mainImage.contentType);
     for (const image of gallery) {
       await saveProductMedia(rawProduct.id, "gallery-image", image.bytes, image.contentType, image.index);
       galleryUrls[image.index] = `/api/admin/products/${rawProduct.id}/media/gallery-image?index=${image.index}`;
@@ -547,9 +625,26 @@ export async function PUT(req: NextRequest) {
       WHERE id = ${rawProduct.id}
       RETURNING id, name, sku, category, subcategory, mrp, selling_price,
                 stock, low_stock_alert, status, featured, main_image_url,
+                gallery_images,
                 tax_rule_id, tax_rate, tax_amount, price_with_tax
     `;
-    return NextResponse.json({ success: true, product: mapAdminProduct(rows[0]) });
+    const cleanupWarnings: string[] = [];
+    for (const index of Array.from(removedIndexes)) {
+      try {
+        await deleteProductMedia(rawProduct.id, "gallery-image", index);
+      } catch (error) {
+        console.error(`Failed to delete removed gallery image ${index} for product ${rawProduct.id}:`, error);
+        cleanupWarnings.push(`Gallery image ${index + 1} could not be removed from storage.`);
+      }
+    }
+    return NextResponse.json({
+      success: true,
+      product: {
+        ...mapAdminProduct(rows[0]),
+        galleryImages: galleryUrls,
+      },
+      ...(cleanupWarnings.length ? { cleanupWarnings } : {}),
+    });
   } catch (error) {
     if (isUniqueViolation(error)) {
       return errorResponse("A product with this SKU already exists.", 409);
