@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   CreditCard, MessageSquare, Store, Smartphone, Users, ShieldCheck,
@@ -7,6 +7,8 @@ import {
   Check, X, Plus, Trash2, Edit2, Eye, EyeOff, Copy,
   Globe, Phone, Mail, IndianRupee, Lock, Bell,
   ToggleLeft, ToggleRight, AlertTriangle, Upload,
+  Image as ImageIcon, ExternalLink, RefreshCw, CheckCircle2,
+  Database, Sparkles, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Toggle, Field, Modal, DeleteConfirm, StatCard, SectionCard } from "./shared/ui";
 import { G, inp, card } from "./shared/constants";
@@ -189,85 +191,915 @@ function SmsGatewayPage() {
   );
 }
 
-function StoreSettingPage() {
-  const [store, setStore] = useState({
-    name: "BharatBazar", tagline: "India's favourite online supermarket",
-    email: "support@bharatbazar.com", phone: "+91 1800-BB-STORE",
-    address: "BharatBazar HQ, Sector 62, Noida, UP 201301",
-    currency: "INR", timezone: "Asia/Kolkata", language: "English (India)",
-    gst: "29ABCDE1234F1ZX", minOrder: "99", deliveryCharge: "49", freeAbove: "499",
-    logo: "", favicon: "",
-    maintenanceMode: false, guestCheckout: true, reviewsEnabled: true, multipleAddresses: true,
-  });
-  const s = (k: string, v: any) => setStore(p => ({ ...p, [k]: v }));
+// ─── StoreSettingPage – Neon DB CRUD ─────────────────────────────────────────
+
+type StoreSettingMeta = {
+  key: string;
+  value: string;
+  type: string;
+  label: string;
+  section: string;
+  description: string;
+  updated_at: string;
+};
+
+type StoreValues = Record<string, string>;
+
+const SECTION_ORDER = ["identity", "locale", "delivery", "features"] as const;
+const SECTION_LABELS: Record<string, string> = {
+  identity: "Store Identity",
+  locale:   "Locale & Currency",
+  delivery: "Delivery Charges",
+  features: "Feature Toggles",
+};
+const SECTION_DESCS: Record<string, string> = {
+  identity: "Name, contact info, GST and branding assets",
+  locale:   "Currency, timezone and language preferences",
+  delivery: "Minimum order and delivery fee thresholds",
+  features: "Enable or disable key store behaviours",
+};
+
+const CURRENCY_OPTIONS  = ["INR","USD","EUR","GBP","AED"];
+const TIMEZONE_OPTIONS  = ["Asia/Kolkata","Asia/Dubai","Asia/Singapore","UTC","America/New_York"];
+const LANGUAGE_OPTIONS  = ["English (India)","Hindi","Tamil","Telugu","Kannada","Malayalam"];
+
+function selectOptionsFor(key: string): string[] {
+  if (key === "currency") return CURRENCY_OPTIONS;
+  if (key === "timezone") return TIMEZONE_OPTIONS;
+  if (key === "language") return LANGUAGE_OPTIONS;
+  return [];
+}
+
+// ─── Store Logo & Favicon Side Section ────────────────────────────────────────
+
+type StoreAssetsProps = {
+  storeName: string;
+  logoUrl: string;
+  faviconUrl: string;
+  onAssetUpdated: (type: "logo" | "favicon", url: string) => void;
+  onAssetDeleted: (type: "logo" | "favicon") => void;
+};
+
+function StoreAssetsSideSection({
+  storeName,
+  logoUrl,
+  faviconUrl,
+  onAssetUpdated,
+  onAssetDeleted,
+}: StoreAssetsProps) {
+  const [uploadingType, setUploadingType] = useState<"logo" | "favicon" | null>(null);
+  const [deletingType,  setDeletingType]  = useState<"logo" | "favicon" | null>(null);
+  const [errorMsg,      setErrorMsg]      = useState<string | null>(null);
+  const [successMsg,    setSuccessMsg]    = useState<string | null>(null);
+  const [copiedKey,     setCopiedKey]     = useState<string | null>(null);
+  const [logoTheme,     setLogoTheme]     = useState<"checker" | "light" | "dark">("checker");
+  const [showManual,    setShowManual]    = useState(false);
+  const [manualLogo,    setManualLogo]    = useState(logoUrl);
+  const [manualFavicon, setManualFavicon] = useState(faviconUrl);
+  const [savingManual,  setSavingManual]  = useState(false);
+
+  useEffect(() => { setManualLogo(logoUrl); }, [logoUrl]);
+  useEffect(() => { setManualFavicon(faviconUrl); }, [faviconUrl]);
+
+  const notifySuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setErrorMsg(null);
+    setTimeout(() => setSuccessMsg(null), 3500);
+  };
+
+  const notifyError = (msg: string) => {
+    setErrorMsg(msg);
+    setSuccessMsg(null);
+  };
+
+  const handleCopy = (text: string, key: string) => {
+    if (!text) return;
+    const fullUrl = text.startsWith("http") ? text : `${window.location.origin}${text}`;
+    navigator.clipboard.writeText(fullUrl);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 1500);
+  };
+
+  const handleFileUpload = async (type: "logo" | "favicon", file: File) => {
+    if (!file) return;
+
+    const maxSize = type === "favicon" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      notifyError(`${type === "favicon" ? "Favicon" : "Logo"} size must be under ${type === "favicon" ? "2MB" : "5MB"}.`);
+      return;
+    }
+
+    try {
+      setUploadingType(type);
+      setErrorMsg(null);
+
+      const formData = new FormData();
+      formData.append("type", type);
+      formData.append("file", file);
+
+      const res = await fetch("/api/admin/store-settings/assets", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        notifyError(data.message || `Failed to upload ${type}.`);
+        return;
+      }
+
+      onAssetUpdated(type, data.url);
+      notifySuccess(`${type === "logo" ? "Store Logo" : "Favicon"} uploaded to 'store-logo' bucket!`);
+    } catch (e) {
+      console.error(e);
+      notifyError("Network error while uploading asset.");
+    } finally {
+      setUploadingType(null);
+    }
+  };
+
+  const handleDelete = async (type: "logo" | "favicon") => {
+    try {
+      setDeletingType(type);
+      setErrorMsg(null);
+
+      const res = await fetch(`/api/admin/store-settings/assets?type=${type}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        notifyError(data.message || `Failed to remove ${type}.`);
+        return;
+      }
+
+      onAssetDeleted(type);
+      notifySuccess(`${type === "logo" ? "Store Logo" : "Favicon"} removed from 'store-logo' bucket.`);
+    } catch (e) {
+      console.error(e);
+      notifyError("Network error while deleting asset.");
+    } finally {
+      setDeletingType(null);
+    }
+  };
+
+  const handleSaveManualUrls = async () => {
+    setSavingManual(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/admin/store-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logo_url: manualLogo.trim(),
+          favicon_url: manualFavicon.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onAssetUpdated("logo", manualLogo.trim());
+        onAssetUpdated("favicon", manualFavicon.trim());
+        notifySuccess("Custom branding URLs saved!");
+      } else {
+        notifyError(data.message || "Failed to update URLs.");
+      }
+    } catch {
+      notifyError("Network error saving URLs.");
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const checkerboardStyle = {
+    backgroundImage: `
+      linear-gradient(45deg, #f1f5f9 25%, transparent 25%),
+      linear-gradient(-45deg, #f1f5f9 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #f1f5f9 75%),
+      linear-gradient(-45deg, transparent 75%, #f1f5f9 75%)
+    `,
+    backgroundSize: "16px 16px",
+    backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
+  };
 
   return (
-    <div className="space-y-6">
-      <SectionCard>
-        <SectionTitle title="Store Identity"/>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Store Name"><input value={store.name} onChange={e => s("name", e.target.value)} className={inp}/></Field>
-          <Field label="Tagline"><input value={store.tagline} onChange={e => s("tagline", e.target.value)} className={inp}/></Field>
-          <Field label="Support Email"><input value={store.email} onChange={e => s("email", e.target.value)} className={inp}/></Field>
-          <Field label="Support Phone"><input value={store.phone} onChange={e => s("phone", e.target.value)} className={inp}/></Field>
-          <div className="sm:col-span-2">
-            <Field label="Business Address"><textarea value={store.address} onChange={e => s("address", e.target.value)} rows={2} className={`${inp} resize-none`}/></Field>
+    <div className="space-y-5">
+      {/* ── HEADER CARD ── */}
+      <div className="rounded-2xl border border-gray-100 bg-gradient-to-br from-white via-white to-emerald-50/30 p-4 shadow-xs">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-emerald-600 bg-emerald-100/70">
+              <ImageIcon size={16} />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-gray-900 leading-tight">Favicon & Logo</h3>
+              <p className="text-[11px] text-gray-400">Store branding assets</p>
+            </div>
           </div>
-          <Field label="GST Number"><input value={store.gst} onChange={e => s("gst", e.target.value)} className={`${inp} font-mono`}/></Field>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-[10px] font-bold text-emerald-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Bucket:</span>
+            <span className="font-mono text-emerald-800 font-extrabold">store-logo</span>
+          </div>
         </div>
-        <SaveBar onSave={() => {}} onDiscard={() => {}}/>
-      </SectionCard>
 
-      <SectionCard>
-        <SectionTitle title="Locale & Currency"/>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Field label="Currency">
-            <select value={store.currency} onChange={e => s("currency", e.target.value)} className={inp}>
-              {["INR","USD","EUR","GBP","AED"].map(c => <option key={c}>{c}</option>)}
-            </select>
-          </Field>
-          <Field label="Timezone">
-            <select value={store.timezone} onChange={e => s("timezone", e.target.value)} className={inp}>
-              {["Asia/Kolkata","Asia/Dubai","Asia/Singapore","UTC","America/New_York"].map(t => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="Language">
-            <select value={store.language} onChange={e => s("language", e.target.value)} className={inp}>
-              {["English (India)","Hindi","Tamil","Telugu","Kannada","Malayalam"].map(l => <option key={l}>{l}</option>)}
-            </select>
-          </Field>
+        {/* Feedback Messages */}
+        <AnimatePresence>
+          {successMsg && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="mt-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2"
+            >
+              <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+              <span className="truncate">{successMsg}</span>
+            </motion.div>
+          )}
+          {errorMsg && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="mt-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-center gap-2"
+            >
+              <AlertTriangle size={14} className="shrink-0 text-red-500" />
+              <span className="truncate">{errorMsg}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ── STORE LOGO CARD ── */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black text-gray-800 uppercase tracking-wider">Store Logo</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-amber-50 text-amber-700 border border-amber-200/60">Main</span>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5">App header, invoices & emails</p>
+          </div>
+          {/* Contrast Preview Toggles */}
+          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-gray-100 text-[10px] font-bold text-gray-600">
+            <button
+              onClick={() => setLogoTheme("checker")}
+              className={`px-1.5 py-0.5 rounded-md transition-all ${logoTheme === "checker" ? "bg-white shadow-xs text-gray-900" : "hover:text-gray-900"}`}
+              title="Checkerboard (Transparency)"
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setLogoTheme("light")}
+              className={`px-1.5 py-0.5 rounded-md transition-all ${logoTheme === "light" ? "bg-white shadow-xs text-gray-900" : "hover:text-gray-900"}`}
+              title="Light background"
+            >
+              Light
+            </button>
+            <button
+              onClick={() => setLogoTheme("dark")}
+              className={`px-1.5 py-0.5 rounded-md transition-all ${logoTheme === "dark" ? "bg-gray-800 text-white shadow-xs" : "hover:text-gray-900"}`}
+              title="Dark background"
+            >
+              Dark
+            </button>
+          </div>
         </div>
-        <SaveBar onSave={() => {}} onDiscard={() => {}}/>
-      </SectionCard>
 
-      <SectionCard>
-        <SectionTitle title="Delivery Charges"/>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Field label="Minimum Order (₹)"><input type="number" value={store.minOrder} onChange={e => s("minOrder", e.target.value)} className={inp}/></Field>
-          <Field label="Delivery Charge (₹)"><input type="number" value={store.deliveryCharge} onChange={e => s("deliveryCharge", e.target.value)} className={inp}/></Field>
-          <Field label="Free Delivery Above (₹)"><input type="number" value={store.freeAbove} onChange={e => s("freeAbove", e.target.value)} className={inp}/></Field>
+        {/* Visual Preview Box */}
+        <div
+          className={`relative rounded-xl border border-gray-200 min-h-[110px] flex items-center justify-center p-3 overflow-hidden transition-colors ${
+            logoTheme === "dark" ? "bg-slate-900" : logoTheme === "light" ? "bg-white" : ""
+          }`}
+          style={logoTheme === "checker" ? checkerboardStyle : {}}
+        >
+          {logoUrl ? (
+            <div className="flex flex-col items-center gap-2">
+              <img
+                src={logoUrl}
+                alt={storeName || "Store Logo"}
+                className="max-h-20 max-w-full object-contain drop-shadow-xs transition-transform hover:scale-105 duration-200"
+              />
+            </div>
+          ) : (
+            <div className="text-center py-2">
+              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center mx-auto text-gray-400 mb-1.5">
+                <Store size={20} />
+              </div>
+              <p className="text-[11px] font-bold text-gray-600">{storeName || "BharatBazar"}</p>
+              <p className="text-[10px] text-gray-400">No logo uploaded yet</p>
+            </div>
+          )}
+
+          {/* Quick open in new tab */}
+          {logoUrl && (
+            <a
+              href={logoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute top-2 right-2 p-1 rounded-md bg-white/80 hover:bg-white text-gray-500 hover:text-gray-800 shadow-xs transition-all"
+              title="Open full image"
+            >
+              <ExternalLink size={12} />
+            </a>
+          )}
         </div>
-        <SaveBar onSave={() => {}} onDiscard={() => {}}/>
-      </SectionCard>
 
-      <SectionCard>
-        <SectionTitle title="Feature Toggles"/>
-        <SettingRow label="Maintenance Mode" hint="Show a maintenance page to all visitors — admin login still works">
-          <Toggle checked={store.maintenanceMode} onChange={() => s("maintenanceMode", !store.maintenanceMode)}/>
-        </SettingRow>
-        <SettingRow label="Guest Checkout" hint="Allow customers to order without creating an account">
-          <Toggle checked={store.guestCheckout} onChange={() => s("guestCheckout", !store.guestCheckout)}/>
-        </SettingRow>
-        <SettingRow label="Product Reviews" hint="Let customers leave star ratings and text reviews on products">
-          <Toggle checked={store.reviewsEnabled} onChange={() => s("reviewsEnabled", !store.reviewsEnabled)}/>
-        </SettingRow>
-        <SettingRow label="Multiple Delivery Addresses" hint="Allow customers to save and choose multiple addresses">
-          <Toggle checked={store.multipleAddresses} onChange={() => s("multipleAddresses", !store.multipleAddresses)}/>
-        </SettingRow>
-      </SectionCard>
+        {/* Actions Bar */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="flex-1 cursor-pointer">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+                className="hidden"
+                disabled={uploadingType === "logo"}
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload("logo", file);
+                  e.target.value = "";
+                }}
+              />
+              <div
+                className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-xs hover:opacity-95 text-center"
+                style={{ background: G }}
+              >
+                {uploadingType === "logo" ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Uploading to bucket...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload size={13} />
+                    <span>{logoUrl ? "Replace Logo" : "Upload Logo"}</span>
+                  </>
+                )}
+              </div>
+            </label>
+
+            {logoUrl && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(logoUrl, "logo")}
+                  className="px-2.5 py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-bold transition-all flex items-center gap-1"
+                  title="Copy logo URL"
+                >
+                  {copiedKey === "logo" ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingType === "logo"}
+                  onClick={() => handleDelete("logo")}
+                  className="px-2.5 py-2 rounded-xl border border-red-100 bg-red-50/60 text-red-600 hover:bg-red-100 text-xs font-bold transition-all flex items-center gap-1"
+                  title="Delete from bucket"
+                >
+                  {deletingType === "logo" ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={13} />
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-gray-400 px-0.5">
+            <span>Formats: PNG, SVG, WebP, JPG</span>
+            <span>Max 5 MB · 512×512 or 240×60</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── STORE FAVICON CARD ── */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black text-gray-800 uppercase tracking-wider">Store Favicon</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-blue-50 text-blue-700 border border-blue-200/60">Browser Icon</span>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-0.5">Tab icon in Chrome, Safari & Edge</p>
+          </div>
+        </div>
+
+        {/* Realistic Browser Tab Simulation */}
+        <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden shadow-xs">
+          {/* Mock Browser Header Bar */}
+          <div className="bg-gray-200/80 px-2.5 py-1.5 flex items-center gap-2 border-b border-gray-200">
+            <div className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-red-400" />
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            </div>
+
+            {/* Active Browser Tab */}
+            <div className="flex-1 max-w-[190px] bg-white rounded-t-md px-2 py-1 flex items-center gap-1.5 shadow-2xs border-t border-x border-gray-200/80">
+              {faviconUrl ? (
+                <img
+                  src={faviconUrl}
+                  alt="Favicon"
+                  className="w-3.5 h-3.5 object-contain rounded-xs shrink-0"
+                />
+              ) : (
+                <Globe size={13} className="text-gray-400 shrink-0" />
+              )}
+              <span className="text-[10px] font-bold text-gray-800 truncate">
+                {storeName || "BharatBazar"}
+              </span>
+              <X size={10} className="text-gray-400 ml-auto shrink-0" />
+            </div>
+          </div>
+
+          {/* Mini Address Bar Preview */}
+          <div className="bg-white px-2.5 py-1.5 flex items-center justify-between gap-2 text-[10px] text-gray-500">
+            <div className="flex items-center gap-1.5 text-gray-400">
+              <Lock size={10} className="text-emerald-600" />
+              <span className="font-mono text-gray-700">bharatbazar.com</span>
+            </div>
+
+            {/* Multi-resolution chip preview */}
+            <div className="flex items-center gap-1 text-[9px] text-gray-400">
+              <div className="w-5 h-5 rounded border border-gray-200 bg-gray-50 flex items-center justify-center" title="16x16 px preview">
+                {faviconUrl ? <img src={faviconUrl} alt="" className="w-3 h-3 object-contain" /> : <Globe size={9}/>}
+              </div>
+              <div className="w-6 h-6 rounded border border-gray-200 bg-gray-50 flex items-center justify-center" title="32x32 px preview">
+                {faviconUrl ? <img src={faviconUrl} alt="" className="w-4 h-4 object-contain" /> : <Globe size={11}/>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Favicon Actions Bar */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="flex-1 cursor-pointer">
+              <input
+                type="file"
+                accept="image/x-icon,image/vnd.microsoft.icon,image/png,image/svg+xml,image/webp,image/jpeg,.ico"
+                className="hidden"
+                disabled={uploadingType === "favicon"}
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload("favicon", file);
+                  e.target.value = "";
+                }}
+              />
+              <div
+                className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-xs hover:opacity-95 text-center"
+                style={{ background: "#2563eb" }}
+              >
+                {uploadingType === "favicon" ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Uploading to bucket...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload size={13} />
+                    <span>{faviconUrl ? "Replace Favicon" : "Upload Favicon"}</span>
+                  </>
+                )}
+              </div>
+            </label>
+
+            {faviconUrl && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(faviconUrl, "favicon")}
+                  className="px-2.5 py-2 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 text-xs font-bold transition-all flex items-center gap-1"
+                  title="Copy favicon URL"
+                >
+                  {copiedKey === "favicon" ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingType === "favicon"}
+                  onClick={() => handleDelete("favicon")}
+                  className="px-2.5 py-2 rounded-xl border border-red-100 bg-red-50/60 text-red-600 hover:bg-red-100 text-xs font-bold transition-all flex items-center gap-1"
+                  title="Delete from bucket"
+                >
+                  {deletingType === "favicon" ? (
+                    <RefreshCw size={13} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={13} />
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-gray-400 px-0.5">
+            <span>Formats: ICO, PNG, SVG, WebP</span>
+            <span>Max 2 MB · 32×32 or 64×64</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── ADVANCED / MANUAL URL DRAWER ── */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-3.5 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setShowManual(v => !v)}
+          className="w-full flex items-center justify-between text-left text-xs font-bold text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <div className="flex items-center gap-1.5">
+            <Sparkles size={13} className="text-amber-500" />
+            <span>Advanced / Manual CDN URLs</span>
+          </div>
+          {showManual ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+
+        {showManual && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="pt-3 space-y-2.5 border-t border-gray-100 mt-2.5"
+          >
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                Logo URL (Bucket or CDN)
+              </label>
+              <input
+                type="text"
+                value={manualLogo}
+                onChange={e => setManualLogo(e.target.value)}
+                placeholder="/api/store-assets/logo or https://cdn..."
+                className={`${inp} text-xs font-mono`}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                Favicon URL (Bucket or CDN)
+              </label>
+              <input
+                type="text"
+                value={manualFavicon}
+                onChange={e => setManualFavicon(e.target.value)}
+                placeholder="/api/store-assets/favicon or https://..."
+                className={`${inp} text-xs font-mono`}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={savingManual}
+              onClick={handleSaveManualUrls}
+              className="w-full py-1.5 rounded-xl bg-gray-900 text-white text-xs font-bold hover:bg-gray-800 transition-all flex items-center justify-center gap-1.5"
+            >
+              {savingManual ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
+              <span>Apply Manual URLs</span>
+            </button>
+          </motion.div>
+        )}
+      </div>
+
+      {/* ── BUCKET STORAGE INFO FOOTER ── */}
+      <div className="p-3 rounded-2xl border border-gray-100 bg-gray-50/80 text-[11px] text-gray-500 space-y-1">
+        <div className="flex items-center justify-between font-bold text-gray-700">
+          <div className="flex items-center gap-1.5">
+            <Database size={12} className="text-emerald-600" />
+            <span>S3 Bucket Details</span>
+          </div>
+          <span className="text-[10px] text-emerald-700 bg-emerald-100/60 px-2 py-0.5 rounded-full font-bold">
+            Live Object Storage
+          </span>
+        </div>
+        <p className="text-[10px] text-gray-400 leading-relaxed">
+          Assets uploaded here are streamed directly to the <span className="font-mono text-gray-700 font-bold">store-logo</span> bucket and delivered with public edge caching headers.
+        </p>
+      </div>
     </div>
   );
 }
+
+
+function StoreSettingPage() {
+  const [meta,        setMeta]        = useState<StoreSettingMeta[]>([]);
+  const [values,      setValues]      = useState<StoreValues>({});
+  const [dirtyBySection, setDirtyBySection] = useState<Record<string, StoreValues>>({});
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [savedSection,  setSavedSection]  = useState<string | null>(null);
+  const [saveError,   setSaveError]   = useState<string | null>(null);
+
+  // ── Fetch all settings from Neon DB ────────────────────────────────────────
+  const fetchSettings = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch("/api/admin/store-settings");
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setError(data.message || "Failed to load store settings.");
+        return;
+      }
+      setMeta(data.meta as StoreSettingMeta[]);
+      setValues(data.settings as StoreValues);
+      setDirtyBySection({});
+    } catch (e) {
+      setError("Network error while loading settings.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSettings(); }, [fetchSettings]);
+
+  // ── Handle field change (marks section as dirty) ────────────────────────────
+  const handleChange = (section: string, key: string, value: string) => {
+    setValues(prev => ({ ...prev, [key]: value }));
+    setDirtyBySection(prev => ({
+      ...prev,
+      [section]: { ...(prev[section] || {}), [key]: value },
+    }));
+  };
+
+  // ── Save a section (PUT) ───────────────────────────────────────────────────
+  const handleSaveSection = async (section: string) => {
+    const dirty = dirtyBySection[section];
+    if (!dirty || Object.keys(dirty).length === 0) return;
+
+    setSavingSection(section);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/admin/store-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dirty),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setSaveError(data.message || "Save failed.");
+      } else {
+        // Clear dirty state for this section
+        setDirtyBySection(prev => {
+          const next = { ...prev };
+          delete next[section];
+          return next;
+        });
+        setSavedSection(section);
+        setTimeout(() => setSavedSection(null), 2500);
+      }
+    } catch {
+      setSaveError("Network error. Please try again.");
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  // ── Discard changes for a section ─────────────────────────────────────────
+  const handleDiscard = (section: string) => {
+    const sectionMeta = meta.filter(m => m.section === section);
+    const restored: StoreValues = {};
+    for (const m of sectionMeta) restored[m.key] = m.value; // revert to last-saved DB value
+    setValues(prev => ({ ...prev, ...restored }));
+    setDirtyBySection(prev => {
+      const next = { ...prev };
+      delete next[section];
+      return next;
+    });
+    setSaveError(null);
+  };
+
+  // ── Reset a single key to empty (DELETE) ──────────────────────────────────
+  const handleReset = async (key: string) => {
+    try {
+      const res = await fetch(`/api/admin/store-settings?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setValues(prev => ({ ...prev, [key]: "" }));
+        // Also update meta to reflect the reset
+        setMeta(prev => prev.map(m => m.key === key ? { ...m, value: "" } : m));
+      }
+    } catch (e) {
+      console.error("Reset failed:", e);
+    }
+  };
+
+  // ── Render a single field based on type ───────────────────────────────────
+  const renderField = (m: StoreSettingMeta) => {
+    const val = values[m.key] ?? m.value;
+    const onChange = (v: string) => handleChange(m.section, m.key, v);
+
+    if (m.type === "boolean") {
+      return (
+        <SettingRow label={m.label} hint={m.description} key={m.key}>
+          <Toggle checked={val === "true"} onChange={() => onChange(val === "true" ? "false" : "true")}/>
+        </SettingRow>
+      );
+    }
+
+    if (m.type === "select") {
+      const opts = selectOptionsFor(m.key);
+      return (
+        <Field label={m.label} key={m.key}>
+          <select value={val} onChange={e => onChange(e.target.value)} className={inp}>
+            {opts.map(o => <option key={o}>{o}</option>)}
+          </select>
+        </Field>
+      );
+    }
+
+    if (m.type === "textarea") {
+      return (
+        <div className="sm:col-span-2" key={m.key}>
+          <Field label={m.label}>
+            <textarea value={val} onChange={e => onChange(e.target.value)} rows={2} className={`${inp} resize-none`}/>
+          </Field>
+        </div>
+      );
+    }
+
+    const extraClass = m.key === "gst_number" ? " font-mono" : "";
+    return (
+      <Field label={m.label} key={m.key}>
+        <div className="relative">
+          <input
+            type={m.type === "number" ? "number" : "text"}
+            value={val}
+            onChange={e => onChange(e.target.value)}
+            className={`${inp}${extraClass} pr-7`}
+          />
+          {val && (
+            <button
+              onClick={() => handleReset(m.key)}
+              title="Reset to empty"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-red-400 transition-colors"
+            >
+              <X size={12}/>
+            </button>
+          )}
+        </div>
+      </Field>
+    );
+  };
+
+  // ── Loading skeleton ───────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        {[1,2,3,4].map(i => (
+          <div key={i} className="rounded-2xl border border-gray-100 bg-white p-5 animate-pulse">
+            <div className="h-4 w-40 bg-gray-100 rounded mb-4"/>
+            <div className="grid grid-cols-2 gap-4">
+              {[1,2,3,4].map(j => <div key={j} className="h-10 bg-gray-100 rounded-xl"/>)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // ── Error state ────────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
+        <AlertTriangle size={28} className="text-red-400 mx-auto mb-2"/>
+        <p className="text-sm font-bold text-red-600">{error}</p>
+        <button
+          onClick={fetchSettings}
+          className="mt-3 px-4 py-1.5 rounded-xl text-xs font-bold bg-red-100 text-red-600 hover:bg-red-200 transition-all"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // ── Group meta by section ──────────────────────────────────────────────────
+  const bySection = (section: string) => meta.filter(m => m.section === section);
+
+  const SectionSaveBar = ({ section }: { section: string }) => {
+    const isDirty  = Object.keys(dirtyBySection[section] || {}).length > 0;
+    const isSaving = savingSection === section;
+    const isSaved  = savedSection  === section;
+    return (
+      <div className="flex items-center justify-between gap-2 pt-4 border-t border-gray-100 mt-6">
+        <p className="text-[11px] text-gray-400">
+          {isDirty ? (
+            <span className="text-amber-500 font-bold">● Unsaved changes</span>
+          ) : (
+            <span className="text-gray-300">All changes saved to Neon DB</span>
+          )}
+        </p>
+        <div className="flex items-center gap-2">
+          {saveError && section === savingSection && (
+            <span className="text-xs text-red-500 font-bold">{saveError}</span>
+          )}
+          <button
+            onClick={() => handleDiscard(section)}
+            disabled={!isDirty || isSaving}
+            className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40 transition-all"
+          >
+            Discard
+          </button>
+          <button
+            onClick={() => handleSaveSection(section)}
+            disabled={!isDirty || isSaving}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white disabled:opacity-40 transition-all"
+            style={{ background: isSaved ? "#10b981" : G }}
+          >
+            {isSaving ? (
+              <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"/> Saving...</>
+            ) : isSaved ? (
+              <><Check size={13}/> Saved!</>
+            ) : (
+              "Save Changes"
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* DB status badge & S3 Bucket status badge */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-100 text-xs font-bold text-emerald-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>
+          Connected to Neon Database · {meta.length} settings loaded
+        </div>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200/80 text-xs font-bold text-amber-800">
+          <Database size={13} className="text-amber-600"/>
+          Bucket: <span className="font-mono text-amber-900 font-extrabold">store-logo</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        </div>
+      </div>
+
+      {/* 2-Column Responsive Layout: Left 2 Cols = Settings Cards, Right 1 Col = Favicon & Logo Side Section */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+        {/* Left 2 columns: General Store Settings */}
+        <div className="xl:col-span-2 space-y-6">
+          {SECTION_ORDER.map(section => {
+            const fields = bySection(section);
+            // In identity section, exclude logo_url and favicon_url from raw text inputs
+            const displayFields = section === "identity"
+              ? fields.filter(f => f.key !== "logo_url" && f.key !== "favicon_url")
+              : fields;
+            if (displayFields.length === 0) return null;
+            const boolFields = displayFields.filter(f => f.type === "boolean");
+            const otherFields = displayFields.filter(f => f.type !== "boolean");
+
+            return (
+              <SectionCard key={section}>
+                <SectionTitle title={SECTION_LABELS[section]} desc={SECTION_DESCS[section]}/>
+
+                {/* Non-boolean fields in a grid */}
+                {otherFields.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {otherFields.map(renderField)}
+                  </div>
+                )}
+
+                {/* Boolean toggle rows */}
+                {boolFields.length > 0 && (
+                  <div className={otherFields.length > 0 ? "mt-4" : ""}>
+                    {boolFields.map(renderField)}
+                  </div>
+                )}
+
+                <SectionSaveBar section={section}/>
+              </SectionCard>
+            );
+          })}
+        </div>
+
+        {/* Right 1 column: Favicon & Logo Side Section */}
+        <div className="xl:col-span-1 space-y-6 xl:sticky xl:top-4">
+          <StoreAssetsSideSection
+            storeName={values.store_name || "BharatBazar"}
+            logoUrl={values.logo_url || ""}
+            faviconUrl={values.favicon_url || ""}
+            onAssetUpdated={(type, url) => {
+              const key = type === "logo" ? "logo_url" : "favicon_url";
+              setValues(prev => ({ ...prev, [key]: url }));
+              setMeta(prev => prev.map(m => m.key === key ? { ...m, value: url } : m));
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("store-settings-updated"));
+                try { localStorage.setItem("bb_store_settings_updated", String(Date.now())); } catch {}
+              }
+            }}
+            onAssetDeleted={(type) => {
+              const key = type === "logo" ? "logo_url" : "favicon_url";
+              setValues(prev => ({ ...prev, [key]: "" }));
+              setMeta(prev => prev.map(m => m.key === key ? { ...m, value: "" } : m));
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("store-settings-updated"));
+                try { localStorage.setItem("bb_store_settings_updated", String(Date.now())); } catch {}
+              }
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function AppSettingPage() {
   const [cfg, setCfg] = useState({

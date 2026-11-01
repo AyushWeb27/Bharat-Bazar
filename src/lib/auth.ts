@@ -8,6 +8,7 @@ const SESSION_SECRET =
 
 export const ADMIN_COOKIE_NAME = "bharat_admin_session";
 export const USER_COOKIE_NAME = "bharat_user_session";
+export const SELLER_COOKIE_NAME = "bharat_seller_session";
 
 export interface AdminSessionPayload {
   id: number;
@@ -131,6 +132,65 @@ export function verifyUserSessionToken(token: string): UserSessionPayload | null
     const payload: UserSessionPayload = JSON.parse(
       Buffer.from(payloadB64, "base64url").toString("utf-8")
     );
+
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+// ── SELLER SESSIONS ──
+export interface SellerSessionPayload {
+  id: number;
+  owner_name: string;
+  store_name: string;
+  store_slug: string;
+  email: string;
+  status: string;
+  exp: number;
+}
+
+export function createSellerSessionToken(
+  seller: { id: number; owner_name: string; store_name: string; store_slug: string; email: string; status: string },
+  expiresInSeconds: number = 60 * 60 * 24 * 7 // 7 days
+): string {
+  const payload: SellerSessionPayload = {
+    id: seller.id,
+    owner_name: seller.owner_name,
+    store_name: seller.store_name,
+    store_slug: seller.store_slug,
+    email: seller.email,
+    status: seller.status,
+    exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
+  };
+
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", SESSION_SECRET)
+    .update(payloadB64)
+    .digest("base64url");
+
+  return `${payloadB64}.${signature}`;
+}
+
+export function verifySellerSessionToken(token: string): SellerSessionPayload | null {
+  try {
+    const [payloadB64, signature] = token.split(".");
+    if (!payloadB64 || !signature) return null;
+
+    const expectedSig = crypto
+      .createHmac("sha256", SESSION_SECRET)
+      .update(payloadB64)
+      .digest("base64url");
+
+    if (signature !== expectedSig) return null;
+
+    const payloadJson = Buffer.from(payloadB64, "base64url").toString("utf-8");
+    const payload: SellerSessionPayload = JSON.parse(payloadJson);
 
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;

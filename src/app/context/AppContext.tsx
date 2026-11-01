@@ -16,6 +16,27 @@ export interface CustomerUser {
   created_at?: string;
 }
 
+export interface StoreSettings {
+  store_name: string;
+  store_tagline: string;
+  support_email: string;
+  support_phone: string;
+  business_address: string;
+  gst_number: string;
+  logo_url: string;
+  favicon_url: string;
+  currency: string;
+  timezone: string;
+  language: string;
+  min_order_amount: string;
+  delivery_charge: string;
+  free_delivery_above: string;
+  maintenance_mode: string;
+  guest_checkout: string;
+  reviews_enabled: string;
+  multiple_addresses: string;
+}
+
 interface AppCtxValue {
   dark: boolean;
   setDark: (d: boolean) => void;
@@ -31,6 +52,9 @@ interface AppCtxValue {
   userLoading: boolean;
   refreshUser: () => Promise<void>;
   logoutUser: () => Promise<void>;
+  storeSettings: StoreSettings | null;
+  storeSettingsLoading: boolean;
+  refreshStoreSettings: () => Promise<void>;
 }
 
 const AppCtx = createContext<AppCtxValue>(null!);
@@ -44,11 +68,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [user, setUser] = useState<CustomerUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [storeSettingsLoading, setStoreSettingsLoading] = useState(true);
 
   // Sync dark theme
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  // Load store settings from Neon DB
+  const refreshStoreSettings = useCallback(async () => {
+    try {
+      setStoreSettingsLoading(true);
+      const res = await fetch("/api/store-settings", {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.settings) {
+        setStoreSettings(data.settings as StoreSettings);
+      }
+    } catch (e) {
+      console.error("Failed to fetch store settings:", e);
+    } finally {
+      setStoreSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshStoreSettings();
+
+    // Fast-refresh listeners: window event, storage event (cross-tab), and tab focus
+    const handleSync = () => {
+      refreshStoreSettings();
+    };
+
+    window.addEventListener("store-settings-updated", handleSync);
+    window.addEventListener("storage", (e) => {
+      if (e.key === "bb_store_settings_updated") refreshStoreSettings();
+    });
+    window.addEventListener("focus", handleSync);
+
+    return () => {
+      window.removeEventListener("store-settings-updated", handleSync);
+      window.removeEventListener("storage", handleSync);
+      window.removeEventListener("focus", handleSync);
+    };
+  }, [refreshStoreSettings]);
+
+  // Update favicon dynamically with fast cache-busting when storeSettings change
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const faviconUrl = storeSettings?.favicon_url?.trim()
+      ? (storeSettings.favicon_url.includes("?")
+          ? `${storeSettings.favicon_url}&t=${Date.now()}`
+          : `${storeSettings.favicon_url}?t=${Date.now()}`)
+      : `/favicon.ico?t=${Date.now()}`;
+
+    // Update or create standard icon links
+    const rels = ["icon", "shortcut icon", "apple-touch-icon"];
+    rels.forEach(rel => {
+      let link = document.querySelector(`link[rel='${rel}']`) as HTMLLinkElement | null;
+      if (!link) {
+        link = document.createElement("link");
+        link.rel = rel;
+        document.head.appendChild(link);
+      }
+      link.href = faviconUrl;
+    });
+
+  }, [storeSettings?.favicon_url, storeSettings?.store_name]);
 
   // Load customer user session from Neon DB
   const refreshUser = useCallback(async () => {
@@ -117,6 +206,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         userLoading,
         refreshUser,
         logoutUser,
+        storeSettings,
+        storeSettingsLoading,
+        refreshStoreSettings,
       }}
     >
       {children}

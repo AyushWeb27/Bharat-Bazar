@@ -67,7 +67,7 @@ import { ShippingPage }            from "./admin/ShippingPage";
 import { SellerKYCPage }           from "./admin/SellerKYCPage";
 import { AdminProfilePage }        from "./admin/AdminProfilePage";
 
-import type { Page } from "./types/index";
+import type { Page } from "../types/index";
 import { G, fmt, orderStatusMeta, card } from "./admin/shared/constants";
 import { revenueData, orderStatus, catRevData, recentOrders, topProducts, NOTIFICATIONS, INIT_CATS, INIT_SUBCATS, INIT_PRODUCTS, INIT_BRANDS, INIT_GROUPS } from "./admin/shared/data";
 import { Toggle, StatusPill, Modal, DeleteConfirm, Field, PageHeader, SearchBar, StatCard, SectionCard } from "./admin/shared/ui";

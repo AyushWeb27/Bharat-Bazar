@@ -214,7 +214,16 @@ export function AppFooter({ setPage }: { setPage: (p: Page) => void }) {
                     initial={{ opacity:0, x:-8 }} whileInView={{ opacity:1, x:0 }}
                     viewport={{ once:true }} transition={{ delay: ci*0.05 + li*0.04 }}
                   >
-                    <a href="#" className="group flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition-colors duration-150">
+                    <a
+                      href={link.label === "Seller Portal" ? "/seller/login" : "#"}
+                      onClick={(e) => {
+                        if (link.label === "Seller Portal") {
+                          e.preventDefault();
+                          setPage("seller-login");
+                        }
+                      }}
+                      className="group flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition-colors duration-150"
+                    >
                       <motion.span
                         className="w-0 h-px rounded-full transition-all duration-200 group-hover:w-3 shrink-0"
                         style={{ background:G }}

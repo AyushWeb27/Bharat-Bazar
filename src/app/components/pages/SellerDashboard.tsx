@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard, ShoppingCart, Monitor, Tag, Layers, PackagePlus,
@@ -7,6 +7,7 @@ import {
   Bell, Search, Menu, X, LogOut, ChevronDown,
   PanelLeftClose, PanelLeftOpen, ShoppingBag,
   UserCheck, MessageSquare, Banknote,
+  Lock, ShieldAlert, Clock, ArrowRight,
 } from "lucide-react";
 
 import { SellerDashboardPage }        from "./seller/DashboardPage";
@@ -30,6 +31,7 @@ import { KYCPage }                    from "./seller/KYCPage";
 import { PerformancePage }            from "./seller/PerformancePage";
 import { CustomerMessagesPage }       from "./seller/CustomerMessagesPage";
 import { BankAccountPage }            from "./seller/BankAccountPage";
+import { SellerLoginPage }       from "./SellerLoginPage";
 import { InvoicePage }                from "./seller/InvoicePage";
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────────
@@ -155,9 +157,17 @@ function NavItemBtn({
   );
 }
 
+type SellerInfo = {
+  storeName: string;
+  sellerEmail: string;
+  sellerInitials: string;
+  logoUrl?: string;
+  status: string;
+};
+
 // ── SIDEBAR ────────────────────────────────────────────────────────────────────
 function SidebarInner({
-  activeNav, setActiveNav, collapsed, setCollapsed, closeMobile, setPage,
+  activeNav, setActiveNav, collapsed, setCollapsed, closeMobile, setPage, sellerInfo, onSignOut,
 }: {
   activeNav: string;
   setActiveNav: (id: string) => void;
@@ -165,6 +175,8 @@ function SidebarInner({
   setCollapsed: (v: boolean) => void;
   closeMobile: () => void;
   setPage: (p: any) => void;
+  sellerInfo: SellerInfo;
+  onSignOut: () => void;
 }) {
   const handleClick = (id: string) => {
     setActiveNav(id);
@@ -232,14 +244,14 @@ function SidebarInner({
               className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0"
               style={{ background: S }}
             >
-              RS
+              {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-white truncate">Ravi Electro Hub</p>
-              <p className="text-[10px] text-white/35 truncate">seller@ravielectro.com</p>
+              <p className="text-xs font-bold text-white truncate">{sellerInfo.storeName}</p>
+              <p className="text-[10px] text-white/35 truncate">{sellerInfo.sellerEmail}</p>
             </div>
             <button
-              onClick={() => setPage("seller-login")}
+              onClick={onSignOut}
               className="text-white/25 hover:text-red-400 transition-colors shrink-0"
               title="Sign out"
             >
@@ -249,11 +261,11 @@ function SidebarInner({
         ) : (
           <div className="relative group flex justify-center">
             <button
-              onClick={() => setPage("seller-login")}
+              onClick={onSignOut}
               className="w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white"
               style={{ background: S }}
             >
-              RS
+              {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
             </button>
             <div className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="bg-gray-900 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-xl">
@@ -281,6 +293,63 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
   const [notifOpen,         setNotifOpen        ] = useState(false);
   const [profileOpen,       setProfileOpen      ] = useState(false);
   const [refreshing,        setRefreshing       ] = useState(false);
+  const [authStatus,        setAuthStatus       ] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
+  const [currentSeller,     setCurrentSeller    ] = useState<{
+    id: number;
+    owner_name?: string;
+    email?: string;
+    store_name?: string;
+    store_logo_url?: string;
+    status?: string;
+  } | null>(null);
+
+  const checkAuth = () => {
+    setAuthStatus("checking");
+    fetch("/api/seller/auth/me")
+      .then(res => res.json())
+      .then(data => {
+        if ((data.success || data.authenticated) && data.seller) {
+          setCurrentSeller(data.seller);
+          setAuthStatus("authenticated");
+        } else {
+          setCurrentSeller(null);
+          setAuthStatus("unauthenticated");
+        }
+      })
+      .catch(() => {
+        setCurrentSeller(null);
+        setAuthStatus("unauthenticated");
+      });
+  };
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await fetch("/api/seller/auth/logout", { method: "POST" });
+    } catch {}
+    setPage("seller-login");
+  };
+
+  const sellerStoreName = currentSeller?.store_name || currentSeller?.owner_name || "Merchant Store";
+  const sellerEmail = currentSeller?.email || "";
+  const sellerInitials = sellerStoreName
+    .split(" ")
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase() || "")
+    .join("") || "BB";
+  const sellerStatus = currentSeller?.status || "active";
+  const sellerLogoUrl = currentSeller?.store_logo_url;
+
+  const sellerInfo: SellerInfo = {
+    storeName: sellerStoreName,
+    sellerEmail,
+    sellerInitials,
+    logoUrl: sellerLogoUrl,
+    status: sellerStatus,
+  };
 
   const sidebarW = sidebarCollapsed ? 64 : 240;
 
@@ -291,6 +360,8 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
     setCollapsed: setSidebarCollapsed,
     closeMobile: () => setMobileSidebarOpen(false),
     setPage,
+    sellerInfo,
+    onSignOut: handleSignOut,
   };
 
   const closeDropdowns = () => { setNotifOpen(false); setProfileOpen(false); };
@@ -304,7 +375,7 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
   function renderPage() {
     switch (activeNav) {
       case "dashboard":              return <SellerDashboardPage onNav={setActiveNav} />;
-      case "orders":                 return <SellerOrdersPage filter="" />;
+      case "orders":                 return <SellerOrdersPage />;
       case "pos-orders":             return <SellerPOSOrdersPage />;
       case "category":               return <SellerCategoryPage />;
       case "sub-category":           return <SellerSubCategoryPage />;
@@ -327,6 +398,24 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
       case "invoices":               return <InvoicePage />;
       default:                       return <SellerDashboardPage onNav={setActiveNav} />;
     }
+  }
+
+  if (authStatus === "checking") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-800 px-4 font-['Plus_Jakarta_Sans',sans-serif]">
+        <div className="flex flex-col items-center max-w-sm text-center">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mb-3 shadow-sm">
+            <RefreshCw size={24} className="text-[#009966] animate-spin" />
+          </div>
+          <h2 className="text-sm font-bold text-gray-900 mb-1">Verifying Merchant Session...</h2>
+          <p className="text-xs text-gray-400">Loading your store profile</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === "unauthenticated" || !currentSeller) {
+    return <SellerLoginPage setPage={setPage} onLoginSuccess={checkAuth} />;
   }
 
   return (
@@ -488,10 +577,10 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
                   className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0"
                   style={{ background: S }}
                 >
-                  RS
+                  {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
                 </div>
                 <div className="hidden md:block text-left">
-                  <p className="text-xs font-bold text-gray-900 whitespace-nowrap leading-tight">Ravi Electro Hub</p>
+                  <p className="text-xs font-bold text-gray-900 whitespace-nowrap leading-tight">{sellerInfo.storeName}</p>
                   <p className="text-[10px] text-gray-400 whitespace-nowrap leading-tight">seller portal</p>
                 </div>
                 <motion.span
@@ -518,22 +607,21 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
                           className="w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black text-white shrink-0"
                           style={{ background: S }}
                         >
-                          RS
+                          {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-black text-gray-900">Ravi Electro Hub</p>
+                          <p className="text-sm font-black text-gray-900 truncate">{sellerInfo.storeName}</p>
                           <span
                             className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full"
-                            style={{ background: `${S}20`, color: S }}
-                          >
-                            ● Verified Seller
+                            style={{ background: sellerInfo.status === "active" ? `${S}20` : "#fef3c7", color: sellerInfo.status === "active" ? S : "#d97706" }}>
+                            ● {sellerInfo.status === "active" ? "Verified Seller" : "Pending Review"}
                           </span>
                         </div>
                       </div>
                     </div>
                     <div className="py-1.5">
                       <button
-                        onClick={() => { setPage("seller-login"); setProfileOpen(false); }}
+                        onClick={() => { handleSignOut(); setProfileOpen(false); }}
                         className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors"
                       >
                         <LogOut size={14} />
@@ -549,6 +637,29 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          {currentSeller?.status && currentSeller.status !== "active" && (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 text-amber-700">
+                  <Clock size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-800">
+                    Merchant Account Under Review
+                  </h4>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Your store registration and KYC documents are currently being processed by the Admin Manage Seller team. Store listing will go live once verified.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveNav("kyc")}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold whitespace-nowrap transition-colors"
+              >
+                View KYC Status
+              </button>
+            </div>
+          )}
           {renderPage()}
         </main>
       </div>

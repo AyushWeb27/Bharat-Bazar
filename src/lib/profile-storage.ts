@@ -17,6 +17,7 @@ export const BRAND_IMAGE_BUCKET_NAME =
 export const PRODUCT_MEDIA_BUCKET_NAME =
   process.env.AWS_PRODUCTS_MEDIA_BUCKET_NAME || "product-main-image-video";
 export const BANNERS_BUCKET_NAME = process.env.AWS_BANNERS_BUCKET_NAME || "banners";
+export const STORE_LOGO_BUCKET_NAME = process.env.AWS_STORE_LOGO_BUCKET_NAME || "store-logo";
 export const MAX_PRODUCT_GALLERY_INDEX = 10000;
 
 export async function saveBannerImage(bannerId: number, body: Uint8Array, contentType: string) {
@@ -336,3 +337,51 @@ export async function deleteBrandImage(brandId: number) {
     Key: `brands/${brandId}/logo`,
   }));
 }
+
+export type StoreAssetType = "logo" | "favicon";
+
+export function detectStoreAssetType(bytes: Uint8Array, mimeHint?: string): string | null {
+  // Check ICO magic bytes (00 00 01 00)
+  if (bytes.length >= 4 && bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01 && bytes[3] === 0x00) {
+    return "image/x-icon";
+  }
+  // Check SVG (text based)
+  if (bytes.length >= 4) {
+    const textSample = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, Math.min(bytes.length, 1024))).trim();
+    if (textSample.startsWith("<svg") || (textSample.startsWith("<?xml") && textSample.includes("<svg"))) {
+      return "image/svg+xml";
+    }
+  }
+  if (mimeHint === "image/svg+xml" || mimeHint === "image/x-icon" || mimeHint === "image/vnd.microsoft.icon") {
+    return mimeHint === "image/svg+xml" ? "image/svg+xml" : "image/x-icon";
+  }
+  // Fallback to banner image types (PNG, JPEG, WebP, GIF, BMP, TIFF, AVIF)
+  return detectBannerImageType(bytes);
+}
+
+export async function saveStoreAsset(type: StoreAssetType, body: Uint8Array, contentType: string) {
+  const { bucket, client } = getProfileStorageConfig(STORE_LOGO_BUCKET_NAME);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: `assets/${type}`,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: "public, max-age=300",
+  }));
+}
+
+export async function loadStoreAsset(type: StoreAssetType) {
+  const { bucket, client } = getProfileStorageConfig(STORE_LOGO_BUCKET_NAME);
+  return client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: `assets/${type}`,
+  }));
+}
+
+export async function deleteStoreAsset(type: StoreAssetType) {
+  const { bucket, client } = getProfileStorageConfig(STORE_LOGO_BUCKET_NAME);
+  await client.send(new DeleteObjectCommand({
+    Bucket: bucket,
+    Key: `assets/${type}`,
+  }));
+}

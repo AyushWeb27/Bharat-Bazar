@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import {
-  Eye, EyeOff, Mail, Lock, Store, CheckCircle2, ShoppingBag,
+  Eye, EyeOff, Mail, Lock, Store, CheckCircle2, ShoppingBag, AlertCircle,
 } from "lucide-react";
 
 const S = "#009966";
@@ -19,18 +19,55 @@ const STATS = [
   { val: "4.8★",      label: "Rating"        },
 ];
 
-export function SellerLoginPage({ setPage }: { setPage: (p: any) => void }) {
+export function SellerLoginPage({
+  setPage,
+  onLoginSuccess,
+}: {
+  setPage: (p: any) => void;
+  onLoginSuccess?: () => void;
+}) {
   const [email,        setEmail       ] = useState("");
   const [password,     setPassword    ] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading,      setLoading     ] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const inp =
     "w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-800 placeholder:text-gray-400 outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all";
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setLoading(true);
-    setTimeout(() => { setLoading(false); setPage("seller"); }, 1500);
+    if (!email.trim() || !password) {
+      setErrorMessage("Please enter your registered email and password.");
+      setLoading(false);
+      return;
+    }
+    setErrorMessage("");
+    try {
+      const res = await fetch("/api/seller/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErrorMessage(data.message || "Failed to sign in. Please verify your credentials.");
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      if (onLoginSuccess) {
+        onLoginSuccess();
+      } else {
+        setPage("seller");
+        if (typeof window !== "undefined" && window.location.pathname === "/seller") {
+          window.location.reload();
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || "An unexpected error occurred. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -81,6 +118,13 @@ export function SellerLoginPage({ setPage }: { setPage: (p: any) => void }) {
             transition={{ delay: 0.18, duration: 0.35 }}
             className="space-y-4"
           >
+            {errorMessage && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-600 flex items-start gap-2">
+                <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
             {/* Email */}
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wide">
@@ -175,7 +219,7 @@ export function SellerLoginPage({ setPage }: { setPage: (p: any) => void }) {
             {/* Register link */}
             <p className="text-center text-sm text-gray-500">
               New seller?{" "}
-              <button className="font-bold hover:underline" style={{ color: S }}>
+              <button type="button" onClick={() => setPage("seller-register")} className="font-bold hover:underline" style={{ color: S }}>
                 Register →
               </button>
             </p>

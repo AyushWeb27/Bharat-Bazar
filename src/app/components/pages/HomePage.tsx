@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import {
   ArrowRight, Bell, ChevronLeft, ChevronRight, Zap, Truck, Package,
@@ -75,6 +76,7 @@ function isStoreStripBanner(value: unknown): value is StoreStripBanner {
 export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
   onAdd:(p:Prod)=>void; onWish:(id:number)=>void; wish:Set<number>; onView:(p:Prod)=>void; setPage:(p:Page)=>void;
 }) {
+  const router = useRouter();
   const [categories, setCategories] = useState<StoreCategory[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoriesError, setCategoriesError] = useState("");
@@ -272,7 +274,7 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
             <p className="mt-0.5 text-[10px] text-muted-foreground sm:text-xs">Explore our popular categories</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button onClick={() => setPage("products")} className="flex items-center gap-1 text-xs font-bold hover:underline" style={{ color:G }}>
+            <button onClick={() => setPage("category")} className="flex items-center gap-1 text-xs font-bold hover:underline" style={{ color:G }}>
               View All <ArrowRight size={11}/>
             </button>
             {!categoriesLoading && !categoriesError && categories.length > 4 && (
@@ -315,7 +317,7 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
             aria-label="Browse categories">
             {categories.map(cat => (
               <motion.button key={cat.id} whileHover={{ y:-4 }} whileTap={{ scale:0.97 }}
-                onClick={() => setPage("products")}
+                onClick={() => router.push(`/category/${encodeURIComponent(cat.name)}`)}
                 className="group flex w-28 shrink-0 snap-start flex-col items-center overflow-hidden rounded-2xl border border-border bg-card text-left shadow-sm transition-all hover:border-[#009966] hover:shadow-md sm:w-32 md:w-36">
                 <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-muted">
                   {cat.imageUrl ? (
@@ -347,8 +349,8 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
               <p className="mt-0.5 text-[10px] text-muted-foreground sm:text-xs">Discover trusted brands across the store</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <button onClick={() => setPage("products")} className="flex items-center gap-1 text-xs font-bold hover:underline" style={{ color: G }}>
-                View Products <ArrowRight size={11} />
+              <button onClick={() => setPage("brands")} className="flex items-center gap-1 text-xs font-bold hover:underline" style={{ color: G }}>
+                View All Brands <ArrowRight size={11} />
               </button>
               {!brandsLoading && !brandsError && brands.length > 4 && (
                 <div className="ml-1 flex items-center gap-1">

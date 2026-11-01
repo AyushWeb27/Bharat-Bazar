@@ -4,7 +4,7 @@ import {
   Search, Plus, Edit2, Trash2, Package, Upload,
   Eye, EyeOff, Star, TrendingUp, AlertTriangle,
   ChevronDown, X, Check, RotateCcw, Boxes, FileText,
-  Truck, Tag, Image, Globe,
+  Truck, Tag, Image, Globe, Scale,
 } from "lucide-react";
 import { S, fmt, card, inp } from "./shared/constants";
 
@@ -529,7 +529,7 @@ function AddProductTab() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-black text-gray-500 uppercase tracking-wider block mb-1.5">
-                  <span className="flex items-center gap-1"><Weight size={10} /> Weight (kg)</span>
+                  <span className="flex items-center gap-1"><Scale size={10} /> Weight (kg)</span>
                 </label>
                 <input type="number" value={form.weight} onChange={e => set("weight", e.target.value)} placeholder="0.5" className={inp} />
               </div>

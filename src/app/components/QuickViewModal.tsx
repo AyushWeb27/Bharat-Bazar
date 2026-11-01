@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { X, Star, Minus, Plus, ShoppingCart, ExternalLink } from "lucide-react";
 import { G, GD, SWATCHES } from "./data/index";
@@ -17,15 +17,37 @@ export function QuickViewModal({
   onView: (p: Prod) => void;
 }) {
   const [qty, setQty] = useState(1);
-  const [selSize, setSelSize] = useState<string | null>(null);
+  const [selSize, setSelSize] = useState<string | null>(product?.sizes?.[0] ?? null);
   const [selSwatch, setSelSwatch] = useState(0);
 
   const p = product;
   const swatches = p ? (SWATCHES[p.id] ?? ["#111"]) : [];
 
+  useEffect(() => {
+    if (product?.sizes?.length) {
+      setSelSize(product.sizes[0]);
+    }
+  }, [product?.id, product?.sizes]);
+
+  const activeVariant = p?.variants?.find(v => v.title === selSize);
+  const currentPrice = activeVariant ? (activeVariant.offerPrice ?? activeVariant.price) : (p?.price ?? 0);
+  const currentMrp = activeVariant ? (activeVariant.price ?? p?.mrp ?? 0) : (p?.mrp ?? 0);
+  const currentOff = currentMrp > currentPrice
+    ? Math.max(0, Math.round((1 - currentPrice / currentMrp) * 100))
+    : (activeVariant ? 0 : (p?.off ?? 0));
+
   function handleAdd() {
     if (p) {
-      onAdd(p);
+      const selectedProduct: Prod = {
+        ...p,
+        price: currentPrice,
+        mrp: currentMrp,
+        off: currentOff,
+        selectedSize: selSize ?? undefined,
+        selectedVariant: activeVariant,
+        name: activeVariant ? `${p.name} (${activeVariant.title})` : (selSize ? `${p.name} (${selSize})` : p.name),
+      };
+      onAdd(selectedProduct);
       onClose();
     }
   }
@@ -65,24 +87,33 @@ export function QuickViewModal({
               >
                 {/* Discount badge */}
                 <div className="absolute top-4 left-4 flex flex-col gap-1.5">
-                  <span className="bg-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">-{p.off}% OFF</span>
-                  <span
-                    className="text-[10px] font-black px-2.5 py-0.5 rounded-full text-white"
-                    style={{ background: p.tagClr }}
-                  >
-                    {p.tag}
-                  </span>
+                  {currentOff > 0 && <span className="bg-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">-{currentOff}% OFF</span>}
+                  {p.tag && (
+                    <span
+                      className="text-[10px] font-black px-2.5 py-0.5 rounded-full text-white"
+                      style={{ background: p.tagClr }}
+                    >
+                      {p.tag}
+                    </span>
+                  )}
                 </div>
 
-                <motion.img
-                  key={p.id}
-                  src={p.img}
-                  alt={p.name}
-                  initial={{ opacity: 0, scale: 1.04 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="w-full h-full object-cover rounded-2xl"
-                  style={{ maxHeight: "360px" }}
-                />
+                {p.img ? (
+                  <motion.img
+                    key={p.id}
+                    src={p.img}
+                    alt={p.name}
+                    initial={{ opacity: 0, scale: 1.04 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="w-full h-full object-cover rounded-2xl"
+                    style={{ maxHeight: "360px" }}
+                  />
+                ) : (
+                  <div className="flex h-full min-h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
+                    <ShoppingCart size={32} strokeWidth={1.5} />
+                    <span className="text-xs font-bold">Product image coming soon</span>
+                  </div>
+                )}
               </div>
 
               {/* Right: Info */}
@@ -107,30 +138,45 @@ export function QuickViewModal({
                 </div>
 
                 {/* Stars */}
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-0.5">
-                    {[1, 2, 3, 4, 5].map(n => (
-                      <Star
-                        key={n}
-                        size={12}
-                        className={n <= Math.round(p.rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}
-                      />
-                    ))}
+                {p.reviews > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map(n => (
+                        <Star
+                          key={n}
+                          size={12}
+                          className={n <= Math.round(p.rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-xs font-bold text-foreground">{p.rating}</span>
+                    <span className="text-xs text-muted-foreground">({p.reviews.toLocaleString("en-IN")} reviews)</span>
                   </div>
-                  <span className="text-xs font-bold text-foreground">{p.rating}</span>
-                  <span className="text-xs text-muted-foreground">({p.reviews.toLocaleString("en-IN")} reviews)</span>
-                </div>
+                ) : <p className="text-xs font-semibold text-muted-foreground">New arrival</p>}
 
                 {/* Price */}
                 <div className="bg-muted rounded-2xl px-4 py-3">
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-2xl font-black text-foreground">{fmt(p.price)}</span>
-                    <span className="text-sm text-muted-foreground line-through">{fmt(p.mrp)}</span>
-                    <span className="text-sm font-black text-red-500">{p.off}% OFF</span>
+                    <motion.span
+                      key={currentPrice}
+                      initial={{ scale: 0.95, opacity: 0.7 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="text-2xl font-black text-foreground"
+                    >
+                      {fmt(currentPrice)}
+                    </motion.span>
+                    {currentMrp > currentPrice && (
+                      <>
+                        <span className="text-sm text-muted-foreground line-through">{fmt(currentMrp)}</span>
+                        {currentOff > 0 && <span className="text-sm font-black text-red-500">{currentOff}% OFF</span>}
+                      </>
+                    )}
                   </div>
-                  <p className="text-xs font-bold mt-1" style={{ color: G }}>
-                    You save {fmt(p.mrp - p.price)}
-                  </p>
+                  {currentMrp > currentPrice && (
+                    <p className="text-xs font-bold mt-1" style={{ color: G }}>
+                      You save {fmt(currentMrp - currentPrice)} 🎉
+                    </p>
+                  )}
                 </div>
 
                 {/* Color chips */}
@@ -153,28 +199,44 @@ export function QuickViewModal({
                   </div>
                 </div>
 
-                {/* Size chips */}
+                {/* Size / Variant chips */}
                 {p.sizes.length > 0 && (
                   <div>
                     <p className="text-[10px] font-black text-foreground uppercase tracking-wider mb-2">
-                      {p.cat === "Electronics" || p.cat === "Mobiles" ? "Storage" : "Size"}
+                      {p.variants?.length
+                        ? (p.variants[0].variationType || "Select Variant / Pack")
+                        : (p.cat === "Electronics" || p.cat === "Mobiles" ? "Storage" : "Size")}
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {p.sizes.map(s => (
-                        <motion.button
-                          key={s}
-                          whileTap={{ scale: 0.92 }}
-                          onClick={() => setSelSize(s)}
-                          className="px-3 py-1.5 rounded-xl border text-xs font-bold transition-all"
-                          style={
-                            selSize === s
-                              ? { background: G, color: "white", borderColor: "transparent" }
-                              : { borderColor: "var(--border)", color: "var(--foreground)" }
-                          }
-                        >
-                          {s}
-                        </motion.button>
-                      ))}
+                      {p.sizes.map(s => {
+                        const variant = p.variants?.find(v => v.title === s);
+                        const isSelected = (selSize ?? p.sizes[0]) === s;
+                        const variantPrice = variant ? (variant.offerPrice ?? variant.price) : null;
+                        return (
+                          <motion.button
+                            key={s}
+                            whileTap={{ scale: 0.92 }}
+                            onClick={() => setSelSize(s)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5"
+                            style={
+                              isSelected
+                                ? { background: G, color: "white", borderColor: "transparent" }
+                                : { borderColor: "var(--border)", color: "var(--foreground)" }
+                            }
+                          >
+                            <span>{s}</span>
+                            {variantPrice !== null && (
+                              <span
+                                className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                                  isSelected ? "bg-white/20 text-white" : "bg-muted text-foreground"
+                                }`}
+                              >
+                                {fmt(variantPrice)}
+                              </span>
+                            )}
+                          </motion.button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

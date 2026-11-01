@@ -2,10 +2,10 @@ export type Page =
   | "home" | "products" | "detail" | "cart" | "wishlist"
   | "signin" | "register" | "forgot-password"
   | "orders" | "account" | "checkout" | "order-confirmation"
-  | "order-tracking" | "search" | "category"
+  | "order-tracking" | "search" | "category" | "brands"
   | "loyalty" | "refer"
   | "about" | "contact" | "terms" | "privacy"
-  | "admin-login" | "admin" | "seller-login" | "seller";
+  | "admin-login" | "admin" | "seller-login" | "seller-register" | "seller";
 
 export const PAGE_PATHS: Record<Page, string> = {
   home:                "/",
@@ -22,7 +22,8 @@ export const PAGE_PATHS: Record<Page, string> = {
   "order-confirmation":"/order-confirmation",
   "order-tracking":    "/order-tracking",
   search:              "/search",
-  category:            "/category/Electronics",
+  category:            "/category",
+  brands:              "/brands",
   loyalty:             "/loyalty",
   refer:               "/refer",
   about:               "/about",
@@ -32,7 +33,18 @@ export const PAGE_PATHS: Record<Page, string> = {
   "admin-login":       "/admin/login",
   admin:               "/admin",
   "seller-login":      "/seller/login",
+  "seller-register":   "/seller/register",
   seller:              "/seller",
+};
+
+export type ProductVariant = {
+  id: number;
+  title: string;
+  price: number;
+  offerPrice: number;
+  stock?: number;
+  variationType?: string;
+  sku?: string;
 };
 
 export type Prod = {
@@ -40,6 +52,7 @@ export type Prod = {
   name: string;
   brand: string;
   cat: string;
+  subcategory?: string;
   price: number;
   mrp: number;
   rating: number;
@@ -55,5 +68,18 @@ export type Prod = {
   img2: string;
   desc: string;
   sizes: string[];
+  variants?: ProductVariant[];
+  selectedVariant?: ProductVariant;
+  selectedSize?: string;
   spec: Record<string, string>;
+  stock?: number;
+  sku?: string;
+  galleryImages?: string[];
+  highlights?: string[];
+  condition?: string;
+  manufacturer?: string;
+  madeIn?: string;
+  warranty?: string;
+  deliveryDays?: string;
+  swatches?: string[];
 };

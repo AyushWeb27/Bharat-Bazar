@@ -39,7 +39,7 @@ export function Modal({ open, onClose, title, children, wide }: {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 16 }}
             transition={{ type: "spring", stiffness: 320, damping: 28 }}
-            className={`relative bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto z-10 ${wide ? "max-w-2xl" : "max-w-md"}`}>
+            className={`relative bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto z-10 ${wide ? "max-w-3xl" : "max-w-md"}`}>
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <h3 className="text-sm font-black text-gray-900">{title}</h3>
               <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all">
@@ -118,11 +118,11 @@ export function PageHeader({ breadcrumb, title, subtitle, count, onAdd, addLabel
   );
 }
 
-export function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+export function SearchBar({ id, value, onChange, placeholder }: { id?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
     <div className="relative flex-1 min-w-[180px]">
       <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      <input id={id} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-3 py-2 text-xs text-gray-700 placeholder:text-gray-400 outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all" />
     </div>
   );

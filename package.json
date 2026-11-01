@@ -17,7 +17,9 @@
     "db:products": "node --env-file=.env scripts/setup-products.mjs",
     "db:taxes": "node --env-file=.env scripts/setup-taxes.mjs",
     "db:banners": "node --env-file=.env scripts/setup-banners.mjs",
-    "admin:add": "node --env-file=.env scripts/create-admin.mjs"
+    "admin:add": "node --env-file=.env scripts/create-admin.mjs",
+    "db:store-settings": "node --env-file=.env scripts/setup-store-settings.mjs",
+    "db:sellers": "node --dns-result-order=ipv4first --env-file=.env scripts/setup-sellers-db.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

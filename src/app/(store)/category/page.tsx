@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { CategoryDirectoryPage } from "../../components/pages/CategoryDirectoryPage";
 
 export default function CategoryIndex() {
-  redirect("/category/Electronics");
+  return <CategoryDirectoryPage />;
 }

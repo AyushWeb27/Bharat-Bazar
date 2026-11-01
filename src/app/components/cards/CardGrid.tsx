@@ -12,6 +12,7 @@ export function CardGrid({ p, onAdd, onWish, wished, onView }: {
   const [hov, setHov] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const [swatch, setSwatch] = useState(0);
+  const [imageFailed, setImageFailed] = useState(false);
   const swatches = SWATCHES[p.id] ?? ["#111"];
 
   return (
@@ -26,22 +27,32 @@ export function CardGrid({ p, onAdd, onWish, wished, onView }: {
       {/* ── IMAGE ZONE ── */}
       <div className="relative overflow-hidden" style={{ aspectRatio:"4/5" }}>
         <div className="absolute inset-0 bg-muted" />
-        <motion.img
-          src={imgIdx === 0 ? p.img : p.img2}
-          alt={p.name}
-          className="absolute inset-0 w-full h-full object-cover"
-          animate={{ scale: hov ? 1.07 : 1, opacity: 1 }}
-          transition={{ duration: 0.5 }}
-        />
+        {p.img && !imageFailed ? (
+          <motion.img
+            src={imgIdx === 0 ? p.img : p.img2 || p.img}
+            alt={p.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            animate={{ scale: hov ? 1.07 : 1, opacity: 1 }}
+            transition={{ duration: 0.5 }}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-50 to-stone-100 text-emerald-800">
+            <Package size={32} strokeWidth={1.5} />
+            <span className="px-4 text-center text-[10px] font-bold">Product image coming soon</span>
+          </div>
+        )}
 
         {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
         {/* ── TOP BADGES ── */}
         <div className="absolute top-3 left-3 flex flex-col gap-1.5">
-          <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
-            -{p.off}% OFF
-          </span>
+          {p.off > 0 && (
+            <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
+              -{p.off}% OFF
+            </span>
+          )}
           {p.tag && (
             <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white shadow-sm" style={{ background: p.tagClr }}>
               {p.tag}
@@ -106,13 +117,19 @@ export function CardGrid({ p, onAdd, onWish, wished, onView }: {
           </div>
         </div>
 
-        <Stars r={p.rating} n={p.reviews} sm />
+        {p.reviews > 0
+          ? <Stars r={p.rating} n={p.reviews} sm />
+          : <span className="text-[9px] font-semibold text-muted-foreground">New arrival</span>}
 
         {/* Price row */}
         <div className="flex items-baseline gap-2 mt-auto">
           <span className="text-lg font-black text-foreground">{fmt(p.price)}</span>
-          <span className="text-xs text-muted-foreground line-through">{fmt(p.mrp)}</span>
-          <span className="text-[10px] font-black text-red-500">{p.off}% off</span>
+          {p.mrp > p.price && (
+            <>
+              <span className="text-xs text-muted-foreground line-through">{fmt(p.mrp)}</span>
+              <span className="text-[10px] font-black text-red-500">{p.off}% off</span>
+            </>
+          )}
         </div>
 
         {/* Badges row */}

@@ -68,7 +68,7 @@ const priorityStyle: Record<string, { color: string }> = {
 /* ─── Quick help card ────────────────────────────────────────────────────── */
 function HelpCard({
   label, icon: Icon, color,
-}: { label: string; icon: React.ComponentType<{ size?: number; color?: string }>; color: string }) {
+}: { label: string; icon: React.ElementType; color: string }) {
   return (
     <button className={`${card} p-4 flex flex-col items-center gap-2 hover:shadow-md transition-shadow w-full`}>
       <div className="rounded-xl p-3" style={{ background: color + "18" }}>

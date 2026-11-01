@@ -24,6 +24,7 @@ function useCurrentPage(): Page {
   if (pathname === "/order-tracking") return "order-tracking";
   if (pathname === "/search") return "search";
   if (pathname.startsWith("/category")) return "category";
+  if (pathname === "/brands") return "brands";
   if (pathname === "/loyalty") return "loyalty";
   if (pathname === "/refer") return "refer";
   if (pathname === "/about") return "about";

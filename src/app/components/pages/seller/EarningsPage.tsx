@@ -80,7 +80,8 @@ function StatCard({
   icon: Icon,
 }: {
   label: string; value: string; sub?: string; color?: string;
-  icon: React.ComponentType<{ size?: number; color?: string }>;
+  // Use ElementType so Lucide ForwardRef icons (size: string|number) are accepted
+  icon: React.ElementType;
 }) {
   return (
     <motion.div

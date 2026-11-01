@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
-  AlertCircle, CheckCircle2, XCircle, GitBranch, Layers, Pencil, Trash2, Hash, ImagePlus, Loader2,
+  AlertCircle, CheckCircle2, XCircle, GitBranch, Layers, Pencil, Trash2, Hash, ImagePlus, Loader2, Filter,
 } from "lucide-react";
 import type { Cat, SubCat } from "./shared/types";
 import { G, toSlug, inp, card } from "./shared/constants";
@@ -302,19 +302,30 @@ export function SubCategoryPage() {
       </div>
 
       <div className={card}>
-        <div className="flex items-center gap-3 p-4 border-b border-gray-100 flex-wrap">
-          <SearchBar value={search} onChange={setSearch} placeholder="Search subcategories…" />
-          <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl p-1 overflow-x-auto">
-            {parentOptions.slice(0, 6).map(parent => (
-              <button
-                key={parent}
-                onClick={() => setFilterParent(parent)}
-                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all"
-                style={filterParent === parent ? { background: G, color: "#fff" } : { color: "#6b7280" }}
+        <div className="flex flex-col gap-3 p-4 border-b border-gray-100 sm:flex-row sm:items-end">
+          <div className="w-full sm:w-64">
+            <label htmlFor="subcategory-parent-filter" className="mb-1.5 block text-[10px] font-black uppercase tracking-wider text-gray-400">
+              Filter by parent category
+            </label>
+            <div className="relative">
+              <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                id="subcategory-parent-filter"
+                value={filterParent}
+                onChange={event => setFilterParent(event.target.value)}
+                className="w-full appearance-none rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold text-gray-700 outline-none transition-all focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20"
               >
-                {parent === "All" ? "All" : parent.split(" ")[0]}
-              </button>
-            ))}
+                {parentOptions.map(parent => (
+                  <option key={parent} value={parent}>{parent === "All" ? "All categories" : parent}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="w-full sm:ml-auto sm:max-w-sm">
+            <label htmlFor="subcategory-search" className="mb-1.5 block text-[10px] font-black uppercase tracking-wider text-gray-400 sm:text-right">
+              Search subcategories
+            </label>
+            <SearchBar id="subcategory-search" value={search} onChange={setSearch} placeholder="Search by name or slug…" />
           </div>
         </div>
         <div className="overflow-x-auto">

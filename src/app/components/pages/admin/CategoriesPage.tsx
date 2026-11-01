@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
-  AlertCircle, CheckCircle2, XCircle, Layers, Pencil, Trash2, Hash, ImagePlus, Loader2,
+  AlertCircle, CheckCircle2, XCircle, Layers, Pencil, Trash2, Hash, ImagePlus, Loader2, Filter,
 } from "lucide-react";
 import type { Cat, GroupCat } from "./shared/types";
 import { G, toSlug, inp, card } from "./shared/constants";
@@ -83,10 +83,6 @@ export function CategoriesPage() {
     return () => URL.revokeObjectURL(previewUrl);
   }, [selectedImage]);
 
-  const groupOptions = useMemo(
-    () => ["All", ...groups.map(group => group.name)],
-    [groups]
-  );
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return categories.filter(category =>
@@ -276,19 +272,31 @@ export function CategoriesPage() {
       </div>
 
       <div className={card}>
-        <div className="flex items-center gap-3 p-4 border-b border-gray-100 flex-wrap">
-          <SearchBar value={search} onChange={setSearch} placeholder="Search categories…" />
-          <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-xl p-1 overflow-x-auto">
-            {groupOptions.slice(0, 5).map(group => (
-              <button
-                key={group}
-                onClick={() => setFilterGroup(group)}
-                className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all"
-                style={filterGroup === group ? { background: G, color: "#fff" } : { color: "#6b7280" }}
+        <div className="flex flex-col gap-3 p-4 border-b border-gray-100 sm:flex-row sm:items-end">
+          <div className="w-full sm:w-64">
+            <label htmlFor="category-group-filter" className="mb-1.5 block text-[10px] font-black uppercase tracking-wider text-gray-400">
+              Filter by group
+            </label>
+            <div className="relative">
+              <Filter size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                id="category-group-filter"
+                value={filterGroup}
+                onChange={event => setFilterGroup(event.target.value)}
+                className="w-full appearance-none rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-3 text-xs font-semibold text-gray-700 outline-none transition-all focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20"
               >
-                {group === "All" ? "All" : group.split(" ")[0]}
-              </button>
-            ))}
+                <option value="All">All groups</option>
+                {groups.map(group => (
+                  <option key={group.id} value={group.name}>{group.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="w-full sm:ml-auto sm:max-w-sm">
+            <label htmlFor="category-search" className="mb-1.5 block text-[10px] font-black uppercase tracking-wider text-gray-400 sm:text-right">
+              Search categories
+            </label>
+            <SearchBar id="category-search" value={search} onChange={setSearch} placeholder="Search by name or slug…" />
           </div>
         </div>
         <div className="overflow-x-auto">

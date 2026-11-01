@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ChevronRight, Star, CheckCircle, Heart, Share2, ZoomIn, Minus, Plus,
@@ -15,11 +15,38 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
   p:Prod; onAdd:(p:Prod)=>void; onWish:(id:number)=>void; wished:boolean; wishedIds:Set<number>; onBack:()=>void; onView:(p:Prod)=>void;
 }) {
   const [selImg, setSelImg] = useState(0);
-  const [selSize, setSelSize] = useState(p.sizes[0]);
+  const [selSize, setSelSize] = useState(p.sizes[0] || "");
   const [selSwatch, setSelSwatch] = useState(0);
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState<"desc"|"spec"|"reviews">("desc");
   const [zoom, setZoom] = useState(false);
+
+  useEffect(() => {
+    if (p.sizes?.length) {
+      setSelSize(p.sizes[0]);
+    }
+  }, [p.id, p.sizes]);
+
+  const activeVariant = p.variants?.find(v => v.title === selSize);
+  const currentPrice = activeVariant ? (activeVariant.offerPrice ?? activeVariant.price) : p.price;
+  const currentMrp = activeVariant ? (activeVariant.price ?? p.mrp) : p.mrp;
+  const currentOff = currentMrp > currentPrice
+    ? Math.max(0, Math.round((1 - currentPrice / currentMrp) * 100))
+    : (activeVariant ? 0 : p.off);
+  const currentStock = activeVariant?.stock !== undefined ? activeVariant.stock : p.stock;
+  const currentInStock = currentStock !== undefined ? currentStock > 0 : p.inStock;
+
+  const selectedProduct: Prod = {
+    ...p,
+    price: currentPrice,
+    mrp: currentMrp,
+    off: currentOff,
+    stock: currentStock,
+    inStock: currentInStock,
+    selectedSize: selSize,
+    selectedVariant: activeVariant,
+    name: activeVariant ? `${p.name} (${activeVariant.title})` : (selSize ? `${p.name} (${selSize})` : p.name),
+  };
 
   // Pincode delivery check
   const [pincode, setPincode] = useState("");
@@ -71,9 +98,13 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
       verified: true,
     },
   ];
-  const imgs = [p.img, p.img2];
-  const swatches = SWATCHES[p.id] ?? ["#111"];
-  const related = PRODUCTS.filter(r => r.cat === p.cat && r.id !== p.id).slice(0, 4);
+  const imgs = p.galleryImages?.length
+    ? Array.from(new Set([p.img, ...p.galleryImages].filter(Boolean)))
+    : Array.from(new Set([p.img, p.img2].filter(Boolean)));
+  const swatches = p.stock === undefined ? SWATCHES[p.id] ?? ["#111"] : p.swatches ?? [];
+  const related = p.stock === undefined
+    ? PRODUCTS.filter(r => r.cat === p.cat && r.id !== p.id).slice(0, 4)
+    : [];
 
   return (
     <div className="space-y-8">
@@ -92,7 +123,7 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
         <div className="space-y-3">
           {/* Thumbnails */}
           <div className="flex gap-2">
-            {imgs.map((img, i) => (
+            {imgs.length > 1 && imgs.map((img, i) => (
               <button key={i} onClick={() => setSelImg(i)}
                 className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${selImg===i ? "border-[#009966]" : "border-border"}`}>
                 <img src={img} alt="" className="w-full h-full object-cover"/>
@@ -103,14 +134,21 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
           <motion.div className="relative rounded-3xl overflow-hidden bg-muted aspect-[4/5] cursor-zoom-in"
             whileTap={{ scale:0.99 }} onClick={() => setZoom(true)}>
             <AnimatePresence mode="wait">
-              <motion.img key={selImg} src={imgs[selImg]} alt={p.name}
-                initial={{ opacity:0, scale:1.04 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0 }}
-                transition={{ duration:0.3 }}
-                className="absolute inset-0 w-full h-full object-cover"/>
+              {imgs[selImg] ? (
+                <motion.img key={imgs[selImg]} src={imgs[selImg]} alt={p.name}
+                  initial={{ opacity:0, scale:1.04 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0 }}
+                  transition={{ duration:0.3 }}
+                  className="absolute inset-0 w-full h-full object-cover"/>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <Package size={36}/>
+                  <span className="text-xs font-bold">Product image coming soon</span>
+                </div>
+              )}
             </AnimatePresence>
             <div className="absolute top-4 left-4 flex flex-col gap-1.5">
-              <span className="bg-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">-{p.off}% OFF</span>
-              <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full text-white" style={{ background:p.tagClr }}>{p.tag}</span>
+              {currentOff > 0 && <span className="bg-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full">-{currentOff}% OFF</span>}
+              {p.tag && <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full text-white" style={{ background:p.tagClr }}>{p.tag}</span>}
             </div>
             <button className="absolute bottom-4 right-4 w-9 h-9 bg-white/80 dark:bg-zinc-800/80 backdrop-blur rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground">
               <ZoomIn size={15}/>
@@ -134,32 +172,51 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{p.brand}</span>
-              <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white" style={{ background:p.tagClr }}>{p.tag}</span>
-              {p.inStock
-                ? <span className="text-[9px] font-black text-[#009966] flex items-center gap-0.5"><CheckCircle size={9}/> In Stock</span>
+              {p.tag && <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white" style={{ background:p.tagClr }}>{p.tag}</span>}
+              {currentInStock
+                ? <span className="text-[9px] font-black text-[#009966] flex items-center gap-0.5"><CheckCircle size={9}/> {currentStock === undefined ? "In Stock" : `${currentStock} In Stock`}</span>
                 : <span className="text-[9px] font-black text-red-500">Out of Stock</span>}
             </div>
             <h1 className="text-xl md:text-2xl font-black text-foreground mt-2 leading-snug">{p.name}</h1>
           </div>
 
-          <div className="flex items-center gap-3">
+          {p.reviews > 0 ? <div className="flex items-center gap-3">
             <Stars r={p.rating} n={p.reviews}/>
             <button className="text-xs font-bold text-muted-foreground hover:underline">{p.reviews.toLocaleString("en-IN")} Reviews</button>
-          </div>
+          </div> : <p className="text-xs font-semibold text-muted-foreground">No reviews yet</p>}
 
           {/* Price */}
           <div className="bg-muted/60 rounded-2xl p-4 space-y-1">
             <div className="flex items-baseline gap-3">
-              <span className="text-3xl font-black text-foreground">{fmt(p.price)}</span>
-              <span className="text-lg text-muted-foreground line-through">{fmt(p.mrp)}</span>
-              <span className="text-base font-black text-red-500">{p.off}% OFF</span>
+              <motion.span
+                key={currentPrice}
+                initial={{ scale: 0.95, opacity: 0.7 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="text-3xl font-black text-foreground"
+              >
+                {fmt(currentPrice)}
+              </motion.span>
+              {currentMrp > currentPrice && (
+                <span className="text-lg text-muted-foreground line-through">
+                  {fmt(currentMrp)}
+                </span>
+              )}
+              {currentOff > 0 && (
+                <span className="text-base font-black text-red-500">
+                  {currentOff}% OFF
+                </span>
+              )}
             </div>
-            <p className="text-sm font-bold" style={{ color:G }}>You save {fmt(p.mrp-p.price)} 🎉</p>
-            {p.emi && <p className="text-xs text-blue-500 font-semibold">No Cost EMI from ₹{Math.round(p.price/12).toLocaleString("en-IN")}/month</p>}
+            {currentMrp > currentPrice && (
+              <p className="text-sm font-bold" style={{ color: G }}>
+                You save {fmt(currentMrp - currentPrice)} 🎉
+              </p>
+            )}
+            {p.emi && <p className="text-xs text-blue-500 font-semibold">No Cost EMI from ₹{Math.round(currentPrice/12).toLocaleString("en-IN")}/month</p>}
           </div>
 
           {/* Color swatch */}
-          <div>
+          {swatches.length > 0 && <div>
             <p className="text-xs font-black text-foreground uppercase tracking-wider mb-2">Colour</p>
             <div className="flex gap-2">
               {swatches.map((c,i) => (
@@ -168,22 +225,60 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
                   style={{ background:c, borderColor: selSwatch===i ? G : "transparent", boxShadow: selSwatch===i ? `0 0 0 2px ${G}` : "none" }}/>
               ))}
             </div>
-          </div>
+          </div>}
 
-          {/* Size */}
+          {/* Size / Variant Options */}
           {p.sizes.length > 0 && (
             <div>
               <p className="text-xs font-black text-foreground uppercase tracking-wider mb-2">
-                {p.cat.includes("Saree") || p.cat === "Sarees & Ethnic" ? "Size / Type" : p.cat === "Gold Jewellery" ? "Size" : p.cat === "Electronics" || p.cat === "Mobiles" ? "Storage" : "Size"}
+                {p.variants?.length
+                  ? (p.variants[0].variationType || "Select Pack / Variant")
+                  : p.cat.includes("Saree") || p.cat === "Sarees & Ethnic"
+                    ? "Size / Type"
+                    : p.cat === "Gold Jewellery"
+                      ? "Size"
+                      : p.cat === "Electronics" || p.cat === "Mobiles"
+                        ? "Storage"
+                        : "Size"}
               </p>
-              <div className="flex flex-wrap gap-2">
-                {p.sizes.map(s => (
-                  <motion.button key={s} whileTap={{ scale:0.92 }} onClick={() => setSelSize(s)}
-                    className={`px-4 py-2 rounded-xl border text-xs font-bold transition-all ${selSize===s ? "text-white border-transparent" : "border-border text-foreground hover:border-[#009966]"}`}
-                    style={selSize===s ? { background:G } : {}}>
-                    {s}
-                  </motion.button>
-                ))}
+              <div className="flex flex-wrap gap-2.5">
+                {p.sizes.map(s => {
+                  const variant = p.variants?.find(v => v.title === s);
+                  const isSelected = selSize === s;
+                  const variantPrice = variant ? (variant.offerPrice ?? variant.price) : null;
+                  const variantSavings = variant && variant.price > variant.offerPrice ? variant.price - variant.offerPrice : 0;
+                  return (
+                    <motion.button
+                      key={s}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setSelSize(s)}
+                      className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-2 ${
+                        isSelected
+                          ? "text-white border-transparent shadow-md ring-2 ring-[#009966]/40"
+                          : "border-border text-foreground hover:border-[#009966] bg-card hover:bg-muted/50"
+                      }`}
+                      style={isSelected ? { background: G } : {}}
+                    >
+                      <span>{s}</span>
+                      {variantPrice !== null && (
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-lg font-black transition-colors ${
+                            isSelected
+                              ? "bg-white/20 text-white"
+                              : "bg-muted text-foreground"
+                          }`}
+                        >
+                          {fmt(variantPrice)}
+                        </span>
+                      )}
+                      {variantSavings > 0 && !isSelected && (
+                        <span className="text-[10px] text-green-600 font-extrabold">
+                          Save {fmt(variantSavings)}
+                        </span>
+                      )}
+                    </motion.button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -195,20 +290,22 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
               <div className="flex items-center border border-border rounded-xl overflow-hidden">
                 <button onClick={() => setQty(q => Math.max(1,q-1))} className="w-10 h-10 flex items-center justify-center hover:bg-muted transition-colors text-foreground"><Minus size={14}/></button>
                 <span className="w-10 text-center font-black text-sm text-foreground">{qty}</span>
-                <button onClick={() => setQty(q => q+1)} className="w-10 h-10 flex items-center justify-center hover:bg-muted transition-colors text-foreground"><Plus size={14}/></button>
+                <button onClick={() => setQty(q => Math.min(currentStock ?? Number.MAX_SAFE_INTEGER, q+1))} disabled={currentStock !== undefined && qty >= currentStock} className="w-10 h-10 flex items-center justify-center hover:bg-muted transition-colors text-foreground disabled:opacity-40"><Plus size={14}/></button>
               </div>
-              <span className="text-xs text-muted-foreground">Only 8 left in stock</span>
+              {currentStock !== undefined && currentStock <= 10 && currentStock > 0 && (
+                <span className="text-xs text-muted-foreground">Only {currentStock} left in stock</span>
+              )}
             </div>
           </div>
 
           {/* CTA */}
           <div className="flex gap-3">
-            <motion.button whileTap={{ scale:0.96 }} onClick={() => onAdd(p)}
-              className="flex-1 text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+            <motion.button whileTap={{ scale:0.96 }} onClick={() => onAdd(selectedProduct)} disabled={!currentInStock}
+              className="flex-1 text-white py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
               style={{ background:`linear-gradient(to right,${GD},${G})` }}>
               <ShoppingCart size={16}/> Add to Cart
             </motion.button>
-            <motion.button whileTap={{ scale:0.96 }}
+            <motion.button whileTap={{ scale:0.96 }} disabled={!currentInStock}
               className="flex-1 bg-amber-400 text-black py-3.5 rounded-2xl font-black text-sm hover:bg-amber-300 transition-colors">
               ⚡ Buy Now
             </motion.button>
@@ -284,18 +381,42 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
           ))}
         </div>
         <div className="p-5">
-          {tab === "desc" && <p className="text-sm text-foreground leading-relaxed">{p.desc}</p>}
+          {tab === "desc" && (
+            <div className="space-y-4">
+              <p className="whitespace-pre-line text-sm text-foreground leading-relaxed">{p.desc || "Product details will be available soon."}</p>
+              {!!p.highlights?.length && (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {p.highlights.map((highlight, index) => (
+                    <li key={`${index}-${highlight}`} className="rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-foreground">{highlight}</li>
+                  ))}
+                </ul>
+              )}
+              {(p.sku || p.condition || p.manufacturer || p.madeIn || p.warranty || p.deliveryDays) && (
+                <dl className="grid grid-cols-2 gap-3 border-t border-border pt-4 text-xs sm:grid-cols-3">
+                  {p.sku && <div><dt className="text-muted-foreground">SKU</dt><dd className="mt-1 font-bold text-foreground">{p.sku}</dd></div>}
+                  {p.condition && <div><dt className="text-muted-foreground">Condition</dt><dd className="mt-1 font-bold text-foreground">{p.condition}</dd></div>}
+                  {p.manufacturer && <div><dt className="text-muted-foreground">Manufacturer</dt><dd className="mt-1 font-bold text-foreground">{p.manufacturer}</dd></div>}
+                  {p.madeIn && <div><dt className="text-muted-foreground">Made in</dt><dd className="mt-1 font-bold text-foreground">{p.madeIn}</dd></div>}
+                  {p.warranty && <div><dt className="text-muted-foreground">Warranty</dt><dd className="mt-1 font-bold text-foreground">{p.warranty}</dd></div>}
+                  {p.deliveryDays && <div><dt className="text-muted-foreground">Dispatch estimate</dt><dd className="mt-1 font-bold text-foreground">{p.deliveryDays} days</dd></div>}
+                </dl>
+              )}
+            </div>
+          )}
           {tab === "spec" && (
-            <div className="grid grid-cols-2 gap-2">
+            p.spec && Object.keys(p.spec).length ? <div className="grid grid-cols-2 gap-2">
               {Object.entries(p.spec).map(([k,v]) => (
                 <div key={k} className="flex flex-col gap-0.5 bg-muted rounded-xl px-3 py-2">
                   <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{k}</span>
                   <span className="text-sm font-bold text-foreground">{v}</span>
                 </div>
               ))}
-            </div>
+            </div> : <p className="text-sm text-muted-foreground">Specifications have not been added for this product.</p>
           )}
-          {tab === "reviews" && (
+          {tab === "reviews" && p.reviews === 0 && (
+            <p className="text-sm text-muted-foreground">No reviews have been added for this product yet.</p>
+          )}
+          {tab === "reviews" && p.reviews > 0 && (
             <div className="space-y-4">
               <div className="flex items-center gap-4">
                 <div className="text-center">
@@ -339,6 +460,7 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
         </div>
       </div>
 
+      {p.stock === undefined && <>
       {/* ── Q&A ── */}
       <section className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="p-5 border-b border-border flex items-center justify-between flex-wrap gap-3">
@@ -440,6 +562,7 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
           ))}
         </div>
       </section>
+      </>}
 
       {/* ── RELATED ── */}
       {related.length > 0 && (
@@ -457,7 +580,7 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
           <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
             className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4"
             onClick={() => setZoom(false)}>
-            <img src={imgs[selImg]} alt={p.name} className="max-w-full max-h-full object-contain rounded-2xl"/>
+            {imgs[selImg] && <img src={imgs[selImg]} alt={p.name} className="max-w-full max-h-full object-contain rounded-2xl"/>}
             <button className="absolute top-4 right-4 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center" onClick={() => setZoom(false)}>
               <X size={20} className="text-white"/>
             </button>
