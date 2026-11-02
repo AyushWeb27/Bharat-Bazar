@@ -5,6 +5,7 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
 ## Features
 - **Next.js App Router**: Optimized route groups `(store)`, `(auth)`, `admin`, and `seller`.
 - **E-Commerce Customer Portal**: Dynamic homepage, categories, product listing, product detail with image gallery & zoom, cart, wishlist, multi-step checkout, order confirmation, and order tracking.
+- **Neon-backed customer orders**: Buy now and cart checkout validate stock, reserve inventory, and persist COD orders with delivery-address and item snapshots.
 - **Admin Portal**: Comprehensive admin dashboard with analytics, inventory, order processing, seller KYC, coupons, flash sales, and reports.
 - **Seller Portal**: Dedicated seller dashboard with catalog management, POS orders, sales reports, wallet, withdrawal, and support.
 - **Vernacular & Indianized UX**: Rupee pricing (₹), PIN code delivery estimator, COD, EMI, multilingual assistance, and Diwali/festival banners.
@@ -30,6 +31,8 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    For the database-backed Admin Customers page, also run `npm run db:users`. This creates or updates the customer `users` table, including gender, date of birth, and VIP fields.
 
    Run `npm run db:addresses` to create the customer-linked `user_addresses` table for saved delivery addresses.
+
+   After setting up users, products, and categories, run `npm run db:cart` and `npm run db:orders` to create the customer cart and order tables. Online payments remain unavailable until a payment gateway is configured.
 
 4. **Create and seed the admin categories table in Neon**:
    ```bash

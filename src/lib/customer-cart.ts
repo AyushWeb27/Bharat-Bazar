@@ -166,6 +166,28 @@ export async function loadCustomerCart(userId: number): Promise<CartItem[]> {
   }));
 }
 
+export async function loadOrderProduct(productId: number, variantTitle: string): Promise<Prod | null> {
+  const rows = await sql`
+    SELECT p.id, p.name, p.short_description, p.full_description, p.category,
+           p.subcategory, p.brand, p.mrp, p.selling_price, p.stock, p.sku,
+           p.main_image_url, p.gallery_images, p.details, p.is_popular,
+           p.is_deal, p.featured, TRUE AS product_active
+    FROM admin_products p
+    WHERE p.id = ${productId}
+      AND p.status = 'active'
+      AND EXISTS (
+        SELECT 1
+        FROM admin_categories c
+        JOIN admin_group_categories g ON g.id = c.group_id AND g.active = TRUE
+        WHERE LOWER(TRIM(c.name)) = LOWER(TRIM(p.category))
+          AND c.active = TRUE
+      )
+    LIMIT 1
+  `;
+  if (!rows.length) return null;
+  return toProduct(rows[0] as RecordValue, variantTitle);
+}
+
 export async function getAvailableCartProduct(productId: number, variantTitle: string) {
   const rows = await sql`
     SELECT p.id, p.stock, p.mrp, p.selling_price, p.details

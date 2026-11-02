@@ -5,7 +5,7 @@ import {
   LogOut, ChevronRight, Edit3, Plus, Trash2, Check,
   Lock, Eye, EyeOff, Globe, Moon, Sun, HelpCircle,
   AlertTriangle, Camera, IndianRupee, Gift, CheckCircle,
-  Calendar, Users, Loader2, Save,
+  Calendar, Users, Loader2, Save, Package, RefreshCw,
 } from "lucide-react";
 import { G, GD } from "../data/index";
 import type { Page } from "../types/index";
@@ -39,6 +39,26 @@ type SavedAddress = {
 };
 
 type AddressForm = Omit<SavedAddress, "id">;
+
+type CustomerOrderItem = {
+  productName: string;
+  variantTitle: string | null;
+  quantity: number;
+  lineTotal: number | string;
+  image: string | null;
+};
+
+type CustomerOrder = {
+  id: number;
+  order_number: string;
+  status: string;
+  payment_method: string;
+  payment_status: string;
+  total_amount: number | string;
+  created_at: string;
+  item_count: number;
+  items: CustomerOrderItem[];
+};
 
 const EMPTY_ADDRESS: AddressForm = {
   label: "Home",
@@ -101,6 +121,38 @@ function formatMemberSince(dateStr?: string) {
   }
 }
 
+function formatOrderAmount(value: number | string) {
+  const amount = Number(value);
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function isCustomerOrder(value: unknown): value is CustomerOrder {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const order = value as Record<string, unknown>;
+  return typeof order.id === "number" &&
+    typeof order.order_number === "string" &&
+    typeof order.status === "string" &&
+    typeof order.payment_method === "string" &&
+    typeof order.payment_status === "string" &&
+    (typeof order.total_amount === "number" || typeof order.total_amount === "string") &&
+    typeof order.created_at === "string" &&
+    typeof order.item_count === "number" &&
+    Array.isArray(order.items) &&
+    order.items.every(item => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+      const row = item as Record<string, unknown>;
+      return typeof row.productName === "string" &&
+        (typeof row.variantTitle === "string" || row.variantTitle === null) &&
+        typeof row.quantity === "number" &&
+        (typeof row.lineTotal === "number" || typeof row.lineTotal === "string") &&
+        (typeof row.image === "string" || row.image === null);
+    });
+}
+
 export function AccountPage({ setPage, dark, setDark }: {
   setPage: (p: Page) => void; dark: boolean; setDark: (v: boolean) => void;
 }) {
@@ -108,6 +160,16 @@ export function AccountPage({ setPage, dark, setDark }: {
 
   const [activeTab,    setActiveTab]    = useState("profile");
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [ordersReload, setOrdersReload] = useState(0);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("section") === "orders") {
+      setActiveTab("orders");
+    }
+  }, []);
 
   // ── Profile form state (synced from DB user) ──
   const [name,         setName]         = useState("");
@@ -196,6 +258,48 @@ export function AccountPage({ setPage, dark, setDark }: {
     void loadAddresses();
     return () => controller.abort();
   }, [activeTab, user]);
+
+  useEffect(() => {
+    if (activeTab !== "orders") return;
+    if (!user) {
+      setOrders([]);
+      setOrdersLoading(false);
+      setOrdersError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    async function loadOrders() {
+      setOrdersLoading(true);
+      setOrdersError("");
+      try {
+        const response = await fetch("/api/customer/orders", {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+            !("success" in result) || result.success !== true ||
+            !("orders" in result) || !Array.isArray(result.orders) ||
+            !result.orders.every(isCustomerOrder)) {
+          const message = result && typeof result === "object" && "message" in result && typeof result.message === "string"
+            ? result.message : "Failed to load your orders.";
+          throw new Error(message);
+        }
+        setOrders(result.orders);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load customer orders:", error);
+          setOrdersError(error instanceof Error ? error.message : "Failed to load your orders.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setOrdersLoading(false);
+      }
+    }
+    void loadOrders();
+    return () => controller.abort();
+  }, [activeTab, ordersReload, user]);
 
   const loadAddresses = async () => {
     setAddressesLoading(true);
@@ -586,6 +690,89 @@ export function AccountPage({ setPage, dark, setDark }: {
               </motion.button>
             )}
           </Section>
+        </div>
+      );
+
+      case "orders": return (
+        <div className="space-y-4">
+          {ordersLoading ? (
+            <div role="status" aria-label="Loading orders" className="space-y-3">
+              {[0, 1, 2].map(item => (
+                <div key={item} className="h-36 animate-pulse rounded-2xl bg-muted" />
+              ))}
+            </div>
+          ) : ordersError ? (
+            <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/25">
+              <p className="text-sm font-bold text-red-700 dark:text-red-300">{ordersError}</p>
+              <button type="button" onClick={() => setOrdersReload(value => value + 1)}
+                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/50">
+                <RefreshCw size={13} /> Try again
+              </button>
+            </div>
+          ) : !user ? (
+            <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
+              <Package size={28} className="mx-auto text-muted-foreground" />
+              <p className="mt-3 text-sm font-bold text-foreground">Sign in to view your orders</p>
+              <p className="mt-1 text-xs text-muted-foreground">Your purchases will appear here after you sign in.</p>
+            </div>
+          ) : orders.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
+              <Package size={28} className="mx-auto text-muted-foreground" />
+              <p className="mt-3 text-sm font-bold text-foreground">No orders yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">Your orders will show up here once you place one.</p>
+              <button type="button" onClick={() => setPage("home")}
+                className="mt-4 rounded-xl px-4 py-2.5 text-xs font-black text-white" style={{ background: G }}>
+                Start shopping
+              </button>
+            </div>
+          ) : orders.map(order => {
+            const status = order.status.replace(/[_-]+/g, " ");
+            const statusTone = ["delivered", "completed"].includes(order.status.toLowerCase())
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+              : ["cancelled", "refunded"].includes(order.status.toLowerCase())
+                ? "bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300"
+                : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300";
+            const date = new Date(order.created_at);
+            const formattedDate = Number.isFinite(date.getTime())
+              ? date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+              : "Date unavailable";
+
+            return (
+              <article key={order.id} className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/35 px-4 py-3 sm:px-5">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">Order placed · {formattedDate}</p>
+                    <p className="mt-1 break-all text-xs font-black text-foreground">{order.order_number}</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1.5 text-[10px] font-black capitalize ${statusTone}`}>{status}</span>
+                </div>
+                <div className="divide-y divide-border px-4 sm:px-5">
+                  {order.items.map((item, index) => (
+                    <div key={`${order.id}-${index}`} className="flex min-w-0 items-center gap-3 py-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/50">
+                        {item.image
+                          ? <img src={item.image} alt="" className="h-full w-full object-contain p-1.5" />
+                          : <Package size={18} className="text-muted-foreground" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-xs font-bold leading-snug text-foreground">{item.productName}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Qty {item.quantity}{item.variantTitle ? ` · ${item.variantTitle}` : ""}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-xs font-black text-foreground">{formatOrderAmount(item.lineTotal)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-5">
+                  <p className="text-[10px] font-semibold text-muted-foreground">
+                    {order.item_count} {order.item_count === 1 ? "item" : "items"} · {order.payment_method.replace(/[_-]+/g, " ").toUpperCase()}
+                  </p>
+                  <p className="text-sm font-black text-foreground">Total {formatOrderAmount(order.total_amount)}</p>
+                </div>
+              </article>
+            );
+          })}
         </div>
       );
 

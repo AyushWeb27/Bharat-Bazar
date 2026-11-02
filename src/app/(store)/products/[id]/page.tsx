@@ -128,10 +128,34 @@ export default function ProductDetail() {
     );
   }
 
+  const buyNow = async (selectedProduct: Prod, quantity: number) => {
+    const checkoutParams = new URLSearchParams({
+      buyNow: "1",
+      productId: String(selectedProduct.id),
+      quantity: String(quantity),
+      variantTitle: selectedProduct.selectedSize || "",
+    });
+    const checkoutPath = `/checkout?${checkoutParams.toString()}`;
+    try {
+      const response = await fetch("/api/auth/me", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const session: unknown = await response.json();
+      const authenticated = response.ok && session && typeof session === "object" &&
+        "authenticated" in session && session.authenticated === true;
+      router.push(authenticated ? checkoutPath : `/signin?redirect=${encodeURIComponent(checkoutPath)}`);
+    } catch (buyError) {
+      console.error("Could not verify sign-in before Buy now:", buyError);
+      router.push(`/signin?redirect=${encodeURIComponent(checkoutPath)}`);
+    }
+  };
+
   return (
     <DetailPage
       p={product}
       onAdd={addCart}
+      onBuyNow={buyNow}
       onWish={toggleWish}
       wished={wish.has(product.id)}
       wishedIds={wish}

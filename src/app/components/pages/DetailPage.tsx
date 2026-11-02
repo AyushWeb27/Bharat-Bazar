@@ -74,8 +74,8 @@ function renderDescription(content: string) {
   });
 }
 
-export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView }: {
-  p:Prod; onAdd:(p:Prod, quantity?:number)=>void; onWish:(id:number)=>void; wished:boolean; wishedIds:Set<number>; onBack:()=>void; onView:(p:Prod)=>void;
+export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBack, onView }: {
+  p:Prod; onAdd:(p:Prod, quantity?:number)=>void; onBuyNow:(p:Prod, quantity:number)=>void; onWish:(id:number)=>void; wished:boolean; wishedIds:Set<number>; onBack:()=>void; onView:(p:Prod)=>void;
 }) {
   const [selImg, setSelImg] = useState(0);
   const [selSize, setSelSize] = useState(p.sizes[0] || "");
@@ -376,9 +376,9 @@ export function DetailPage({ p, onAdd, onWish, wished, wishedIds, onBack, onView
               className="flex items-center justify-center gap-2 rounded-2xl bg-[#087a51] px-4 py-4 text-sm font-black text-white shadow-[0_10px_24px_rgba(8,122,81,0.2)] transition-colors hover:bg-[#066641] disabled:cursor-not-allowed disabled:opacity-50">
               <ShoppingCart size={17}/> Add to cart
             </motion.button>
-            <motion.button type="button" whileTap={{ scale:0.97 }} disabled={!currentInStock}
+            <motion.button type="button" whileTap={{ scale:0.97 }} onClick={() => onBuyNow(selectedProduct, qty)} disabled={!currentInStock || !selectedProduct.cod}
               className="flex items-center justify-center gap-2 rounded-2xl border border-[#087a51]/30 bg-card px-4 py-4 text-sm font-black text-emerald-800 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30">
-              <span aria-hidden="true">⚡</span> Buy now
+              <span aria-hidden="true">⚡</span> {selectedProduct.cod ? "Buy now" : "COD unavailable"}
             </motion.button>
           </div>
 
