@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle } from "lucide-react";
+import { AlertCircle, CheckCircle } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { Header } from "../components/Header/index";
 import { AppFooter } from "../components/Footer/index";
@@ -41,7 +41,7 @@ export default function StoreLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { cart, wish, dark, setDark, toast, searchQuery, setSearchQuery } = useApp();
+  const { cartCount, wish, dark, setDark, toast, searchQuery, setSearchQuery } = useApp();
   const currentPage = useCurrentPage();
 
   const setPage = (p: Page) => {
@@ -54,7 +54,7 @@ export default function StoreLayout({
       <Header
         dark={dark}
         setDark={setDark}
-        cart={cart}
+        cartCount={cartCount}
         wish={wish}
         page={currentPage}
         setPage={setPage}
@@ -79,12 +79,12 @@ export default function StoreLayout({
           >
             <span className="text-xl leading-none">{em}</span>
             <span className="mt-0.5">{label}</span>
-            {pg === "cart" && cart.length > 0 && (
+            {pg === "cart" && cartCount > 0 && (
               <span
                 className="absolute top-1 right-4 w-3.5 h-3.5 text-white text-[7px] font-black rounded-full flex items-center justify-center"
                 style={{ background: G }}
               >
-                {cart.length}
+                {cartCount}
               </span>
             )}
             {pg === "wishlist" && wish.size > 0 && (
@@ -133,9 +133,11 @@ export default function StoreLayout({
             exit={{ opacity: 0, y: 60, scale: 0.9 }}
             className="fixed bottom-20 md:bottom-6 right-4 z-[200] bg-zinc-900 dark:bg-zinc-800 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 text-sm font-bold border border-zinc-700 max-w-xs"
           >
-            <CheckCircle size={15} style={{ color: G }} />
+            {toast.kind === "error"
+              ? <AlertCircle size={15} className="shrink-0 text-rose-400"/>
+              : <CheckCircle size={15} style={{ color: G }} />}
             <span className="line-clamp-1">
-              Added: <span style={{ color: G }}>{toast.name}</span>
+              {toast.kind === "success" ? <>Added: <span style={{ color: G }}>{toast.name}</span></> : toast.name}
             </span>
           </motion.div>
         )}

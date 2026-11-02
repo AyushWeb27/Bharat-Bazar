@@ -15,8 +15,8 @@ const NOTIFS = [
   { id:4, icon:"💰", text:"₹200 cashback credited to your wallet", time:"2 days ago", unread:false },
 ];
 
-export function Header({ dark, setDark, cart, wish, page, setPage, query, setQuery }:{
-  dark:boolean; setDark:(v:boolean)=>void; cart:number[]; wish:Set<number>;
+export function Header({ dark, setDark, cartCount, wish, page, setPage, query, setQuery }:{
+  dark:boolean; setDark:(v:boolean)=>void; cartCount:number; wish:Set<number>;
   page:Page; setPage:(p:Page)=>void; query:string; setQuery:(s:string)=>void;
 }) {
   const { user, logoutUser } = useApp();
@@ -217,12 +217,12 @@ export function Header({ dark, setDark, cart, wish, page, setPage, query, setQue
                 </motion.div>
                 <span className="text-[8px] mt-0.5 font-medium text-muted-foreground group-hover:text-foreground transition-colors">Cart</span>
                 <AnimatePresence>
-                  {cart.length > 0 && (
-                    <motion.span key={cart.length} initial={{ scale:0, rotate:-20 }} animate={{ scale:1, rotate:0 }} exit={{ scale:0 }}
+                  {cartCount > 0 && (
+                    <motion.span key={cartCount} initial={{ scale:0, rotate:-20 }} animate={{ scale:1, rotate:0 }} exit={{ scale:0 }}
                       transition={{ type:"spring", stiffness:500, damping:25 }}
                       className="absolute top-0.5 right-0.5 w-4 h-4 text-white text-[8px] font-black rounded-full flex items-center justify-center shadow-sm"
                       style={{ background: G }}>
-                      {cart.length}
+                      {cartCount}
                     </motion.span>
                   )}
                 </AnimatePresence>

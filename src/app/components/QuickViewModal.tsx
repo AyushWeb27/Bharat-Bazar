@@ -13,7 +13,7 @@ export function QuickViewModal({
 }: {
   product: Prod | null;
   onClose: () => void;
-  onAdd: (p: Prod) => void;
+  onAdd: (p: Prod, quantity?: number) => void;
   onView: (p: Prod) => void;
 }) {
   const [qty, setQty] = useState(1);
@@ -47,7 +47,7 @@ export function QuickViewModal({
         selectedVariant: activeVariant,
         name: activeVariant ? `${p.name} (${activeVariant.title})` : (selSize ? `${p.name} (${selSize})` : p.name),
       };
-      onAdd(selectedProduct);
+      onAdd(selectedProduct, qty);
       onClose();
     }
   }

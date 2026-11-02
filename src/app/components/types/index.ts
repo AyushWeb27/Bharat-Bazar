@@ -83,3 +83,9 @@ export type Prod = {
   deliveryDays?: string;
   swatches?: string[];
 };
+
+export type CartItem = {
+  id: number;
+  quantity: number;
+  product: Prod;
+};

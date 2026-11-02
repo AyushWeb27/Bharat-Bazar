@@ -36,6 +36,17 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
   const [otpTimer, setOtpTimer] = useState(30);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const finishSignIn = () => {
+    setTimeout(() => {
+      const redirect = new URLSearchParams(window.location.search).get("redirect");
+      if (redirect?.startsWith("/") && !redirect.startsWith("//")) {
+        window.location.assign(redirect);
+      } else {
+        setPage("home");
+      }
+    }, 700);
+  };
+
   useEffect(() => {
     if (step === "otp") {
       setOtpTimer(30);
@@ -138,9 +149,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
 
         setSuccessMsg(`✓ Welcome back, ${data.user.name}!`);
         await refreshUser();
-        setTimeout(() => {
-          setPage("home");
-        }, 700);
+        finishSignIn();
       } else {
         const otpCode = otp.join("");
         if (otpCode.length < 6) {
@@ -165,9 +174,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
 
         setSuccessMsg(`✓ Verified! Welcome, ${data.user.name}.`);
         await refreshUser();
-        setTimeout(() => {
-          setPage("home");
-        }, 700);
+        finishSignIn();
       }
     } catch (err: any) {
       console.error("Sign in error:", err);
@@ -180,9 +187,7 @@ export function SignInPage({ setPage }: { setPage: (p: Page) => void }) {
     setError("");
     setSuccessMsg(`✓ Google sign in successful! Welcome, ${googleUser.name}. Email verified in database.`);
     await refreshUser();
-    setTimeout(() => {
-      setPage("home");
-    }, 700);
+    finishSignIn();
   };
 
   const handleGoogleError = (err: string) => {

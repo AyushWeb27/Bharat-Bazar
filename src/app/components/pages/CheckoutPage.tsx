@@ -7,6 +7,7 @@ import {
 import { G, GD } from "../data/index";
 import type { Page } from "../types/index";
 import { fmt } from "../utils/format";
+import type { CartItem } from "../types/index";
 
 const inp = "w-full border border-border rounded-lg px-3.5 py-2.5 text-sm text-foreground bg-background placeholder:text-muted-foreground outline-none focus:border-[#009966] focus:ring-2 focus:ring-[#009966]/20 transition-all";
 const label = "block text-xs font-bold text-foreground mb-1.5 tracking-wide";
@@ -16,17 +17,11 @@ const SAVED_ADDRESSES = [
   { id: 2, tag: "Office", name: "Rahul Sharma", line1: "45 Connaught Place", line2: "Block C", city: "New Delhi", state: "Delhi", pin: "110001", phone: "9876543210" },
 ];
 
-const MOCK_ITEMS = [
-  { name: "iPhone 15 Pro Max 256GB", qty: 1, price: 134900, img: "https://images.unsplash.com/photo-1696446702183-cbd96c1abb3a?w=80&h=80&fit=crop" },
-  { name: "Kanjivaram Silk Saree", qty: 2, price: 1499, img: "https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?w=80&h=80&fit=crop" },
-  { name: "Atomic Habits (Paperback)", qty: 1, price: 299, img: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=80&h=80&fit=crop" },
-];
-
 const BANKS = ["HDFC Bank", "ICICI Bank", "SBI", "Axis Bank", "Kotak Bank", "Punjab National Bank"];
 
 const STEPS = ["Delivery Address", "Payment", "Order Placed"];
 
-export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
+export function CheckoutPage({ setPage, cart, cartLoading }: { setPage: (p: Page) => void; cart: CartItem[]; cartLoading: boolean }) {
   const [step, setStep] = useState(0);
   const [selectedAddr, setSelectedAddr] = useState(1);
   const [showNewAddr, setShowNewAddr] = useState(false);
@@ -37,12 +32,14 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
   const [bank, setBank] = useState(BANKS[0]);
   const [placingOrder, setPlacingOrder] = useState(false);
 
-  const subtotal = MOCK_ITEMS.reduce((s, i) => s + i.price * i.qty, 0);
+  const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const gst = Math.round(subtotal * 0.18);
   const shipping = subtotal > 499 ? 0 : 49;
   const total = subtotal + gst + shipping;
+  const cartAvailable = cart.length > 0 && cart.every(item => item.product.inStock);
 
   const handlePlaceOrder = () => {
+    if (!cartAvailable) return;
     setPlacingOrder(true);
     setTimeout(() => {
       setPlacingOrder(false);
@@ -50,6 +47,21 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
       setTimeout(() => setPage("order-confirmation" as any), 800);
     }, 1500);
   };
+
+  if (cartLoading) {
+    return <div aria-label="Loading checkout" className="mx-auto h-72 max-w-5xl animate-pulse rounded-2xl border border-border bg-card"/>;
+  }
+
+  if (cart.length === 0) {
+    return (
+      <section className="mx-auto flex max-w-xl flex-col items-center rounded-[2rem] border border-border bg-card px-6 py-14 text-center">
+        <Package size={32} className="text-muted-foreground"/>
+        <h1 className="mt-4 text-xl font-black text-foreground">Your cart is empty</h1>
+        <p className="mt-2 text-sm text-muted-foreground">Add an item before continuing to checkout.</p>
+        <button type="button" onClick={() => setPage("cart")} className="mt-5 rounded-xl bg-[#087a51] px-5 py-3 text-sm font-black text-white">Back to cart</button>
+      </section>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -193,10 +205,10 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
               <div className="bg-card rounded-2xl border border-border p-5 sticky top-24 space-y-4">
                 <h3 className="font-black text-foreground text-sm">Order Summary</h3>
                 <div className="space-y-2 text-xs text-muted-foreground">
-                  {MOCK_ITEMS.map((item, i) => (
-                    <div key={i} className="flex justify-between gap-2">
-                      <span className="line-clamp-1 flex-1">{item.name} × {item.qty}</span>
-                      <span className="font-bold text-foreground shrink-0">{fmt(item.price * item.qty)}</span>
+                  {cart.map(item => (
+                    <div key={item.id} className="flex justify-between gap-2">
+                      <span className="line-clamp-1 flex-1">{item.product.name} × {item.quantity}</span>
+                      <span className="shrink-0 font-bold text-foreground">{fmt(item.product.price * item.quantity)}</span>
                     </div>
                   ))}
                   <div className="border-t border-border pt-2 space-y-1">
@@ -209,7 +221,7 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
                     </div>
                   </div>
                 </div>
-                <motion.button whileTap={{ scale: 0.97 }} onClick={() => setStep(1)}
+                <motion.button whileTap={{ scale: 0.97 }} onClick={() => setStep(1)} disabled={!cartAvailable}
                   className="w-full py-3 rounded-2xl text-sm font-black text-white flex items-center justify-center gap-2"
                   style={{ background: `linear-gradient(to right,${GD},${G})` }}>
                   Continue to Payment <ChevronRight size={15} />
@@ -327,12 +339,12 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
                   <Tag size={14} style={{ color: G }} /> Order Summary
                 </h3>
                 <div className="space-y-3">
-                  {MOCK_ITEMS.map((item, i) => (
-                    <div key={i} className="flex gap-2.5">
-                      <img src={item.img} alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                  {cart.map(item => (
+                    <div key={item.id} className="flex gap-2.5">
+                      <img src={item.product.img} alt={item.product.name} className="h-10 w-10 shrink-0 rounded-lg bg-muted object-contain" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-foreground line-clamp-2 leading-snug">{item.name}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">Qty: {item.qty} · {fmt(item.price * item.qty)}</p>
+                        <p className="line-clamp-2 text-xs font-semibold leading-snug text-foreground">{item.product.name}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">Qty: {item.quantity} · {fmt(item.product.price * item.quantity)}</p>
                       </div>
                     </div>
                   ))}
@@ -347,7 +359,7 @@ export function CheckoutPage({ setPage }: { setPage: (p: Page) => void }) {
                   </div>
                 </div>
                 <motion.button whileTap={{ scale: 0.97 }} onClick={handlePlaceOrder}
-                  disabled={placingOrder}
+                  disabled={placingOrder || !cartAvailable}
                   className="w-full py-3.5 rounded-2xl text-sm font-black text-white flex items-center justify-center gap-2 disabled:opacity-80"
                   style={{ background: `linear-gradient(to right,${GD},${G})`, boxShadow: `0 4px 16px ${G}44` }}>
                   {placingOrder ? (
