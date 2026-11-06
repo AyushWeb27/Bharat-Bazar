@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Ticket, Plus, Edit2, Trash2, Copy, CheckCircle2, Percent, IndianRupee } from "lucide-react";
+import { Ticket, Plus, Edit2, Trash2, Copy, CheckCircle2, Percent } from "lucide-react";
 import { Toggle, Modal, DeleteConfirm, Field, PageHeader, SearchBar, StatCard, SectionCard } from "./shared/ui";
 import { G, inp } from "./shared/constants";
 
@@ -17,22 +17,13 @@ type Coupon = {
   active: boolean;
 };
 
-const INIT_COUPONS: Coupon[] = [
-  { id: 1, code: "WELCOME50",  type: "flat",    value: 50,  minOrder: 299,  maxDisc: 50,  expiry: "31 Dec 2026", used: 1247, limit: 5000,  active: true  },
-  { id: 2, code: "SAVE20",     type: "percent", value: 20,  minOrder: 499,  maxDisc: 200, expiry: "31 Oct 2026", used: 3842, limit: 10000, active: true  },
-  { id: 3, code: "FLAT100",    type: "flat",    value: 100, minOrder: 999,  maxDisc: 100, expiry: "15 Sep 2026", used: 892,  limit: 2000,  active: true  },
-  { id: 4, code: "NEWUSER",    type: "percent", value: 15,  minOrder: 199,  maxDisc: 150, expiry: "31 Dec 2026", used: 2341, limit: 0,     active: true  },
-  { id: 5, code: "DIWALI30",   type: "percent", value: 30,  minOrder: 799,  maxDisc: 500, expiry: "01 Nov 2026", used: 0,    limit: 3000,  active: false },
-  { id: 6, code: "BB200",      type: "flat",    value: 200, minOrder: 1499, maxDisc: 200, expiry: "30 Sep 2026", used: 341,  limit: 1000,  active: true  },
-  { id: 7, code: "FREESHIP",   type: "flat",    value: 49,  minOrder: 149,  maxDisc: 49,  expiry: "31 Dec 2026", used: 5621, limit: 0,     active: true  },
-  { id: 8, code: "FESTIVE40",  type: "percent", value: 40,  minOrder: 999,  maxDisc: 800, expiry: "15 Oct 2026", used: 0,    limit: 2500,  active: false },
-  { id: 9, code: "REFER10",    type: "percent", value: 10,  minOrder: 99,   maxDisc: 100, expiry: "31 Dec 2026", used: 7834, limit: 0,     active: true  },
-];
-
 const BLANK: Omit<Coupon,"id"> = { code:"", type:"flat", value:50, minOrder:299, maxDisc:100, expiry:"", used:0, limit:1000, active:true };
 
 export function CouponPage() {
-  const [rows, setRows]         = useState(INIT_COUPONS);
+  const [rows, setRows]         = useState<Coupon[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [error, setError]       = useState("");
   const [q, setQ]               = useState("");
   const [typeF, setTypeF]       = useState("All");
   const [statusF, setStatusF]   = useState("All");
@@ -41,6 +32,35 @@ export function CouponPage() {
   const [delId, setDelId]       = useState<number | null>(null);
   const [form, setForm]         = useState(BLANK);
   const [copied, setCopied]     = useState<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadCoupons() {
+      try {
+        const response = await fetch("/api/admin/coupons", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" ||
+            !("success" in result) || result.success !== true ||
+            !("coupons" in result) || !Array.isArray(result.coupons)) {
+          const message = result && typeof result === "object" && "message" in result &&
+            typeof result.message === "string" ? result.message : "Failed to load coupons.";
+          throw new Error(message);
+        }
+        setRows(result.coupons as Coupon[]);
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setError(loadError instanceof Error ? loadError.message : "Failed to load coupons.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void loadCoupons();
+    return () => controller.abort();
+  }, []);
 
   const filtered = rows.filter(r => {
     const qOk = !q || r.code.toLowerCase().includes(q.toLowerCase());
@@ -54,23 +74,86 @@ export function CouponPage() {
     setForm({ code:r.code, type:r.type, value:r.value, minOrder:r.minOrder, maxDisc:r.maxDisc, expiry:r.expiry, used:r.used, limit:r.limit, active:r.active });
     setEditing(r); setModal(true);
   };
-  const save = () => {
-    if (!form.code.trim()) return;
-    if (editing) {
-      setRows(p => p.map(r => r.id === editing.id ? { ...r, ...form } : r));
-    } else {
-      setRows(p => [...p, { id: Date.now(), ...form }]);
+  const save = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/coupons", {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, id: editing?.id }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true ||
+          !("coupon" in result) || !result.coupon || typeof result.coupon !== "object") {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to save coupon.";
+        throw new Error(message);
+      }
+      const saved = result.coupon as Coupon;
+      setRows(previous => previous.some(row => row.id === saved.id)
+        ? previous.map(row => row.id === saved.id ? saved : row)
+        : [saved, ...previous]);
+      setModal(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save coupon.");
+    } finally {
+      setSaving(false);
     }
-    setModal(false);
   };
-  const confirmDelete = (id: number) => { setRows(p => p.filter(r => r.id !== id)); setDelId(null); };
-  const toggleActive  = (id: number) => setRows(p => p.map(r => r.id === id ? { ...r, active: !r.active } : r));
-  const copyCode = (id: number, code: string) => {
-    navigator.clipboard.writeText(code).catch(() => {});
-    setCopied(id);
-    setTimeout(() => setCopied(null), 1500);
+  const confirmDelete = async (id: number) => {
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/coupons?id=${id}`, { method: "DELETE" });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to delete coupon.";
+        throw new Error(message);
+      }
+      setRows(previous => previous.filter(row => row.id !== id));
+      setDelId(null);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete coupon.");
+    }
   };
-  const set = (k: keyof typeof form, v: any) => setForm(p => ({ ...p, [k]: v }));
+  const toggleActive = async (id: number) => {
+    const coupon = rows.find(row => row.id === id);
+    if (!coupon) return;
+    setError("");
+    try {
+      const response = await fetch("/api/admin/coupons", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...coupon, active: !coupon.active }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true ||
+          !("coupon" in result) || !result.coupon || typeof result.coupon !== "object") {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to update coupon.";
+        throw new Error(message);
+      }
+      const updated = result.coupon as Coupon;
+      setRows(previous => previous.map(row => row.id === id ? updated : row));
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Failed to update coupon.");
+    }
+  };
+  const copyCode = async (id: number, code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1500);
+    } catch (copyError) {
+      setError(copyError instanceof Error ? copyError.message : "Could not copy coupon code.");
+    }
+  };
+  const set = <K extends keyof typeof form>(key: K, value: typeof form[K]) =>
+    setForm(previous => ({ ...previous, [key]: value }));
 
   const totalUsed  = rows.reduce((s, r) => s + r.used, 0);
   const activeCount = rows.filter(r => r.active).length;
@@ -83,6 +166,7 @@ export function CouponPage() {
           <Plus size={15}/> Add Coupon
         </button>
       </PageHeader>
+      {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -107,7 +191,9 @@ export function CouponPage() {
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {filtered.map(r => {
+          {loading ? (
+            <div className="col-span-full py-12 text-center text-sm text-gray-400">Loading coupons…</div>
+          ) : filtered.map(r => {
             const isFlat = r.type === "flat";
             const usagePct = r.limit > 0 ? Math.min((r.used / r.limit) * 100, 100) : null;
             const accentColor = isFlat ? "#6366f1" : "#d97706";
@@ -155,7 +241,9 @@ export function CouponPage() {
 
                 {/* Meta */}
                 <p className="text-[10px] text-gray-400 mb-4 leading-relaxed">
-                  Min order ₹{r.minOrder.toLocaleString("en-IN")} &nbsp;·&nbsp; Exp: {r.expiry}
+                Min order ₹{r.minOrder.toLocaleString("en-IN")} &nbsp;·&nbsp; Exp: {r.expiry
+                  ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${r.expiry}T00:00:00Z`))
+                  : "Never"}
                 </p>
 
                 {/* Usage */}
@@ -198,7 +286,7 @@ export function CouponPage() {
               </motion.div>
             );
           })}
-          {filtered.length === 0 && (
+          {!loading && filtered.length === 0 && (
             <div className="col-span-full py-12 text-center text-sm text-gray-400">No coupons match your filters</div>
           )}
         </div>
@@ -230,7 +318,7 @@ export function CouponPage() {
               <input type="number" value={form.maxDisc} onChange={e => set("maxDisc", +e.target.value)} min={0} className={inp}/>
             </Field>
             <Field label="Expiry Date">
-              <input type="text" value={form.expiry} onChange={e => set("expiry", e.target.value)} placeholder="31 Dec 2026" className={inp}/>
+              <input type="date" value={form.expiry} onChange={e => set("expiry", e.target.value)} className={inp}/>
             </Field>
             <Field label="Usage Limit (0 = unlimited)">
               <input type="number" value={form.limit} onChange={e => set("limit", +e.target.value)} min={0} className={inp}/>
@@ -245,8 +333,8 @@ export function CouponPage() {
               <button onClick={() => setModal(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-gray-500 border border-gray-200 hover:bg-gray-50 transition-all">
                 Cancel
               </button>
-              <button onClick={save} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all" style={{ background: G }}>
-                {editing ? "Save Changes" : "Create Coupon"}
+              <button onClick={() => void save()} disabled={saving} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-60" style={{ background: G }}>
+                {saving ? "Saving…" : editing ? "Save Changes" : "Create Coupon"}
               </button>
             </div>
           </div>

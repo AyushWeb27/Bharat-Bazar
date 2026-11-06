@@ -27,6 +27,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     const orders = await sql`
       SELECT customer_orders.order_number, customer_orders.status, payment_method, payment_status,
              subtotal, tax_amount, shipping_amount, total_amount,
+             coupon_code, coupon_discount,
              shipping_address, created_at, customer_orders.updated_at,
              order_return.status AS return_status,
              order_return.requested_at AS return_requested_at,

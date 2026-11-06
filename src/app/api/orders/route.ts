@@ -6,6 +6,7 @@ import {
   loadCustomerCart,
   loadOrderProduct,
 } from "@/lib/customer-cart";
+import { calculateCouponDiscount, type CouponType } from "@/lib/coupons";
 import type { CartItem } from "@/app/components/types";
 
 export const dynamic = "force-dynamic";
@@ -157,27 +158,144 @@ export async function POST(req: NextRequest) {
     }
 
     const totals = getTotals(lines);
+    const couponCode = body.couponCode;
+    let coupon: {
+      id: number;
+      code: string;
+      type: CouponType;
+      value: number;
+      minOrder: number;
+      maxDiscount: number;
+      usedCount: number;
+      usageLimit: number;
+      expiresAt: string | null;
+      discount: number;
+    } | null = null;
+    if (couponCode !== undefined) {
+      if (typeof couponCode !== "string" || !/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(couponCode)) {
+        return failure("Enter a valid coupon code.", 400);
+      }
+      const couponRows = await sql`
+        SELECT id, code, discount_type, discount_value, min_order_amount,
+               max_discount_amount, expires_at, used_count, usage_limit
+        FROM admin_coupons
+        WHERE code = ${couponCode}
+          AND is_active = TRUE
+          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+          AND (usage_limit = 0 OR used_count < usage_limit)
+        LIMIT 1
+      `;
+      if (!couponRows.length) {
+        return failure("This coupon is invalid, expired, inactive, or fully redeemed.", 400);
+      }
+      const row = couponRows[0];
+      const previousRedemption = await sql`
+        SELECT id
+        FROM customer_coupon_redemptions
+        WHERE coupon_id = ${row.id} AND user_id = ${userId}
+        LIMIT 1
+      `;
+      if (previousRedemption.length) {
+        return failure("You have already used this coupon. Each coupon can be used once per customer.", 409);
+      }
+      const minOrder = Number(row.min_order_amount);
+      if (totals.subtotal < minOrder) {
+        return failure(`This coupon requires a minimum order of ₹${minOrder.toLocaleString("en-IN")}.`, 400);
+      }
+      const type = String(row.discount_type) as CouponType;
+      const value = Number(row.discount_value);
+      const maxDiscount = Number(row.max_discount_amount);
+      const expiresAt = row.expires_at
+        ? new Date(String(row.expires_at)).toISOString()
+        : null;
+      const discount = calculateCouponDiscount(type, value, maxDiscount, totals.subtotal);
+      if (discount <= 0) return failure("This coupon does not apply to the current order.", 400);
+      coupon = {
+        id: Number(row.id),
+        code: String(row.code),
+        type,
+        value,
+        minOrder,
+        maxDiscount,
+        usedCount: Number(row.used_count),
+        usageLimit: Number(row.usage_limit),
+        expiresAt,
+        discount,
+      };
+    }
+
+    const finalTotal = totals.total - (coupon?.discount || 0);
     const dateStamp = new Date().toISOString().slice(2, 10).replace(/-/g, "");
     const orderNumber = `BB${dateStamp}${randomBytes(4).toString("hex").toUpperCase()}`;
+    const insertOrder = coupon
+      ? sql`
+          WITH claimed_coupon AS (
+            UPDATE admin_coupons
+            SET used_count = used_count + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ${coupon.id}
+              AND code = ${coupon.code}
+              AND discount_type = ${coupon.type}
+              AND discount_value = ${coupon.value}
+              AND min_order_amount = ${coupon.minOrder}
+              AND max_discount_amount = ${coupon.maxDiscount}
+              AND expires_at IS NOT DISTINCT FROM ${coupon.expiresAt}::TIMESTAMP WITH TIME ZONE
+              AND is_active = TRUE
+              AND (usage_limit = 0 OR used_count < usage_limit)
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+              AND min_order_amount <= ${totals.subtotal}
+              AND NOT EXISTS (
+                SELECT 1
+                FROM customer_coupon_redemptions
+                WHERE coupon_id = ${coupon.id} AND user_id = ${userId}
+              )
+            RETURNING id
+          ),
+          created_order AS (
+            INSERT INTO customer_orders (
+              order_number, user_id, status, payment_method, payment_status,
+              subtotal, tax_amount, shipping_amount, total_amount, shipping_address,
+              coupon_id, coupon_code, coupon_discount
+            )
+            SELECT
+              ${orderNumber}, ${userId}, 'placed', 'cod', 'pending',
+              ${totals.subtotal}, ${totals.taxAmount}, ${totals.shippingAmount},
+              ${finalTotal}, ${JSON.stringify(address)}::jsonb,
+              claimed_coupon.id, ${coupon.code}, ${coupon.discount}
+            FROM claimed_coupon
+            RETURNING id, order_number, coupon_id
+          ),
+          recorded_redemption AS (
+            INSERT INTO customer_coupon_redemptions (coupon_id, user_id, order_id)
+            SELECT created_order.coupon_id, ${userId}, created_order.id
+            FROM created_order
+            RETURNING order_id
+          )
+          SELECT created_order.id, created_order.order_number
+          FROM created_order
+          JOIN recorded_redemption ON recorded_redemption.order_id = created_order.id
+        `
+      : sql`
+          INSERT INTO customer_orders (
+            order_number, user_id, status, payment_method, payment_status,
+            subtotal, tax_amount, shipping_amount, total_amount, shipping_address
+          )
+          VALUES (
+            ${orderNumber}, ${userId}, 'placed', 'cod', 'pending',
+            ${totals.subtotal}, ${totals.taxAmount}, ${totals.shippingAmount},
+            ${finalTotal}, ${JSON.stringify(address)}::jsonb
+          )
+          RETURNING id, order_number
+        `;
     const reserveQueries = lines.map(line => sql`
       SELECT reserve_customer_product_stock(
         ${line.productId},
         ${line.variantTitle},
         ${line.quantity}
       )
+      WHERE EXISTS (
+        SELECT 1 FROM customer_orders WHERE order_number = ${orderNumber}
+      )
     `);
-    const insertOrder = sql`
-      INSERT INTO customer_orders (
-        order_number, user_id, status, payment_method, payment_status,
-        subtotal, tax_amount, shipping_amount, total_amount, shipping_address
-      )
-      VALUES (
-        ${orderNumber}, ${userId}, 'placed', 'cod', 'pending',
-        ${totals.subtotal}, ${totals.taxAmount}, ${totals.shippingAmount},
-        ${totals.total}, ${JSON.stringify(address)}::jsonb
-      )
-      RETURNING id, order_number
-    `;
     const insertLines = lines.map(line => sql`
       INSERT INTO customer_order_items (
         order_id, product_id, product_name, variant_title, sku,
@@ -203,26 +321,37 @@ export async function POST(req: NextRequest) {
       WHERE order_number = ${orderNumber}
     `;
     const clearCart = fromCart
-      ? [sql`DELETE FROM customer_cart_items WHERE user_id = ${userId}`]
+      ? [sql`
+          DELETE FROM customer_cart_items
+          WHERE user_id = ${userId}
+            AND EXISTS (SELECT 1 FROM customer_orders WHERE order_number = ${orderNumber})
+        `]
       : [];
     const results = await sql.transaction([
-      ...reserveQueries,
       insertOrder,
+      ...reserveQueries,
       ...insertLines,
       insertInitialStatus,
       ...clearCart,
     ]);
-    const orderRows = results[reserveQueries.length] as Array<{ id: number; order_number: string }>;
+    const orderRows = results[0] as Array<{ id: number; order_number: string }>;
     const order = orderRows[0];
+    if (!order && coupon) {
+      return failure("This coupon is no longer available. Refresh checkout and try again.", 409);
+    }
     if (!order) throw new Error("Order transaction completed without returning an order.");
 
     return NextResponse.json(
-      { success: true, orderNumber: order.order_number, total: totals.total },
+      { success: true, orderNumber: order.order_number, total: finalTotal },
       { status: 201, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
     if (isRecord(error) && error.code === "P0001") {
       return failure("Stock changed while placing your order. Refresh checkout and try again.", 409);
+    }
+    if (isRecord(error) && error.code === "23505" &&
+        error.constraint === "customer_coupon_redemptions_coupon_id_user_id_key") {
+      return failure("You have already used this coupon. Each coupon can be used once per customer.", 409);
     }
     console.error("POST /api/orders error:", error);
     return failure("Could not place your order. Please try again.", 500);

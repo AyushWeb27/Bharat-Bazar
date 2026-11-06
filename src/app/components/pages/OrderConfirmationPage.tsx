@@ -27,6 +27,8 @@ type Order = {
   tax_amount: number | string;
   shipping_amount: number | string;
   total_amount: number | string;
+  coupon_code?: string | null;
+  coupon_discount?: number | string;
   shipping_address: unknown;
   created_at: string;
 };
@@ -324,6 +326,12 @@ export function OrderConfirmationPage({ setPage }: { setPage: (page: Page) => vo
                 {Number(order.shipping_amount) === 0 ? "FREE" : money(order.shipping_amount)}
               </span>
             </div>
+            {Number(order.coupon_discount) > 0 && (
+              <div className="flex justify-between gap-3 text-sm text-emerald-700 dark:text-emerald-300">
+                <span>Coupon{order.coupon_code ? ` · ${order.coupon_code}` : ""}</span>
+                <span className="font-semibold">−{money(order.coupon_discount)}</span>
+              </div>
+            )}
             <div className="border-t border-dashed border-border pt-4">
               <div className="flex items-end justify-between gap-3">
                 <div>

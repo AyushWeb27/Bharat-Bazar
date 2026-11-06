@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   AlertCircle, Banknote, Building2, Check, ChevronRight, Clock3, CreditCard,
@@ -10,6 +10,9 @@ import { G, GD } from "../data/index";
 import type { CartItem, Page } from "../types/index";
 import { fmt } from "../utils/format";
 import type { CustomerUser } from "../../context/AppContext";
+import { APPLIED_COUPON_STORAGE_KEY } from "@/lib/coupons";
+
+type AppliedCoupon = { code: string; discount: number };
 
 type AddressForm = {
   recipient: string;
@@ -172,6 +175,12 @@ export function CheckoutPage({
   const [directPurchase, setDirectPurchase] = useState<DirectPurchase | null>(null);
   const [placingOrder, setPlacingOrder] = useState(false);
   const [error, setError] = useState("");
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponMessage, setCouponMessage] = useState("");
+  const [couponMessageIsError, setCouponMessageIsError] = useState(false);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const restoredCoupon = useRef(false);
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [addressesLoading, setAddressesLoading] = useState(true);
   const [addressesError, setAddressesError] = useState("");
@@ -307,7 +316,8 @@ export function CheckoutPage({
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const tax = Math.round(subtotal * 0.18);
   const shipping = subtotal > 499 ? 0 : 49;
-  const total = subtotal + tax + shipping;
+  const couponDiscount = appliedCoupon ? Math.min(appliedCoupon.discount, subtotal) : 0;
+  const total = subtotal + tax + shipping - couponDiscount;
   const addressValid = address.recipient.trim().length >= 2 &&
     /^[6-9]\d{9}$/.test(address.phone.trim()) &&
     address.line1.trim().length >= 3 &&
@@ -319,6 +329,68 @@ export function CheckoutPage({
   const codApplicable = items.length > 0 && items.every(item => item.product.cod);
   const codAvailable = available && items.every(item => item.product.cod);
   const loading = !queryReady || (directMode ? directLoading : cartLoading) || userLoading || addressesLoading;
+
+  async function applyCoupon(codeValue = couponCode) {
+    const code = codeValue.trim().toUpperCase();
+    if (applyingCoupon || !code) {
+      if (!code) {
+        setCouponMessageIsError(true);
+        setCouponMessage("Enter a coupon code.");
+      }
+      return;
+    }
+
+    setApplyingCoupon(true);
+    setCouponMessage("");
+    setCouponMessageIsError(false);
+    try {
+      const response = await fetch("/api/coupons/validate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, subtotal }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !isRecord(result) || result.success !== true ||
+          !isRecord(result.coupon) || typeof result.coupon.code !== "string" ||
+          typeof result.coupon.discount !== "number" || !Number.isFinite(result.coupon.discount)) {
+        const message = isRecord(result) && typeof result.message === "string"
+          ? result.message
+          : "Could not apply this coupon.";
+        throw new Error(message);
+      }
+      setAppliedCoupon({ code: result.coupon.code, discount: result.coupon.discount });
+      setCouponCode(result.coupon.code);
+      setCouponMessage("Coupon applied successfully.");
+      window.sessionStorage.setItem(APPLIED_COUPON_STORAGE_KEY, result.coupon.code);
+    } catch (couponError) {
+      setCouponMessageIsError(true);
+      setCouponMessage(couponError instanceof Error ? couponError.message : "Could not apply this coupon.");
+      if (window.sessionStorage.getItem(APPLIED_COUPON_STORAGE_KEY) === code) {
+        window.sessionStorage.removeItem(APPLIED_COUPON_STORAGE_KEY);
+      }
+    } finally {
+      setApplyingCoupon(false);
+    }
+  }
+
+  useEffect(() => {
+    if (loading || !user || restoredCoupon.current) return;
+    restoredCoupon.current = true;
+    const savedCode = window.sessionStorage.getItem(APPLIED_COUPON_STORAGE_KEY);
+    if (savedCode) {
+      setCouponCode(savedCode);
+      void applyCoupon(savedCode);
+    }
+  }, [loading, user]);
+
+  function removeCoupon() {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponMessage("");
+    setCouponMessageIsError(false);
+    window.sessionStorage.removeItem(APPLIED_COUPON_STORAGE_KEY);
+  }
 
   function selectAddress(saved: SavedAddress) {
     setSelectedAddressId(saved.id);
@@ -390,6 +462,7 @@ export function CheckoutPage({
         source: directMode ? "direct" : "cart",
         paymentMethod,
         address,
+        ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
         ...(directMode && directPurchase ? directPurchase : {}),
       };
       const response = await fetch("/api/orders", {
@@ -696,6 +769,38 @@ export function CheckoutPage({
                   </div>
                 ))}
               </div>
+              <div className="mt-5 border-t border-border pt-4">
+                <label htmlFor="checkout-coupon" className="mb-2 block text-xs font-black text-foreground">
+                  Have a coupon?
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="checkout-coupon"
+                    value={couponCode}
+                    onChange={event => setCouponCode(event.target.value.toUpperCase())}
+                    onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void applyCoupon(); } }}
+                    placeholder="Enter code"
+                    aria-label="Coupon code"
+                    className={`${inputClass} min-w-0 flex-1 py-2.5 font-mono uppercase`}
+                  />
+                  <button type="button" onClick={() => void applyCoupon()} disabled={applyingCoupon}
+                    className="shrink-0 rounded-xl bg-[#087a51] px-4 text-xs font-black text-white transition disabled:opacity-60">
+                    {applyingCoupon ? "Checking…" : "Apply"}
+                  </button>
+                  {appliedCoupon && (
+                    <button type="button" onClick={removeCoupon}
+                      className="shrink-0 rounded-xl border border-border px-3 text-xs font-black text-muted-foreground transition hover:border-rose-300 hover:text-rose-700">
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {couponMessage && (
+                  <p role={couponMessageIsError ? "alert" : "status"}
+                    className={`mt-2 text-xs font-semibold ${couponMessageIsError ? "text-rose-700 dark:text-rose-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                    {couponMessage}
+                  </p>
+                )}
+              </div>
             </section>
           </div>
 
@@ -712,6 +817,12 @@ export function CheckoutPage({
                 <div className="flex justify-between text-muted-foreground"><span>Subtotal</span><span className="font-semibold text-foreground">{fmt(subtotal)}</span></div>
                 <div className="flex justify-between text-muted-foreground"><span>GST (18%)</span><span className="font-semibold text-foreground">{fmt(tax)}</span></div>
                 <div className="flex justify-between text-muted-foreground"><span>Delivery</span><span className="font-bold text-emerald-700 dark:text-emerald-400">{shipping === 0 ? "FREE" : fmt(shipping)}</span></div>
+                {appliedCoupon && (
+                  <div className="flex justify-between gap-3 text-emerald-700 dark:text-emerald-300">
+                    <span className="min-w-0 truncate">Coupon · {appliedCoupon.code}</span>
+                    <span className="shrink-0 font-bold">−{fmt(couponDiscount)}</span>
+                  </div>
+                )}
                 {step === 1 && (
                   <div className="flex justify-between gap-3 text-muted-foreground">
                     <span>Payment method</span>

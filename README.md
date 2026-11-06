@@ -34,6 +34,8 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
 
    After setting up users, products, and categories, run `npm run db:cart` and `npm run db:orders` to create the customer cart and order tables. The orders setup also creates and backfills order-status history, the return-request table, and verified product reviews. Customers can cancel before shipping, request a return within seven days of delivery, and submit one product review after delivery; reviews require admin approval before appearing publicly. Rerun the setup after deploying order-schema changes. Online payments remain unavailable until a payment gateway is configured.
 
+   Run `npm run db:coupons` after `npm run db:orders` to create the admin coupon table and add coupon details to customer orders. Coupons can then be created and managed in the admin dashboard and applied during checkout.
+
 4. **Create and seed the admin categories table in Neon**:
    ```bash
    npm run db:categories

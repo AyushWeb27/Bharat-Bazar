@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, LoaderCircle, LockKeyhole, Minus, PackageCheck, Plus, ShoppingBag, Tag, Trash2 } from "lucide-react";
 import { fmt } from "../utils/format";
 import type { CartItem, Page, Prod } from "../types/index";
 import type { CustomerUser } from "../../context/AppContext";
+import { APPLIED_COUPON_STORAGE_KEY } from "@/lib/coupons";
 
 export function CartPage({ cart, loading, error, user, refreshCart, updateQuantity, removeItem, onView, setPage }: {
   cart: CartItem[];
@@ -20,6 +21,9 @@ export function CartPage({ cart, loading, error, user, refreshCart, updateQuanti
   const [discount, setDiscount] = useState(0);
   const [couponApplied, setCouponApplied] = useState("");
   const [couponMsg, setCouponMsg] = useState("");
+  const [couponError, setCouponError] = useState(false);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const restoredCoupon = useRef(false);
   const [busyItem, setBusyItem] = useState<number | null>(null);
 
   const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
@@ -28,29 +32,67 @@ export function CartPage({ cart, loading, error, user, refreshCart, updateQuanti
   const appliedDiscount = Math.min(discount, subtotal);
   const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const handleApplyCoupon = () => {
+  const handleApplyCoupon = async (codeValue = coupon) => {
     setCouponMsg("");
-    const code = coupon.trim().toUpperCase();
-    if (code === "SAVE500") {
-      setDiscount(500);
-      setCouponApplied(code);
-      setCouponMsg("₹500 OFF applied!");
-    } else if (code === "WELCOME200") {
-      setDiscount(200);
-      setCouponApplied(code);
-      setCouponMsg("₹200 OFF applied!");
-    } else {
-      setDiscount(0);
-      setCouponApplied("");
-      setCouponMsg("Invalid coupon code");
+    setCouponError(false);
+    const code = codeValue.trim().toUpperCase();
+    if (!code) {
+      setCouponError(true);
+      setCouponMsg("Enter a coupon code.");
+      return;
+    }
+
+    setApplyingCoupon(true);
+    try {
+      const response = await fetch("/api/coupons/validate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, subtotal }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true ||
+          !("coupon" in result) || !result.coupon || typeof result.coupon !== "object" ||
+          !("code" in result.coupon) || typeof result.coupon.code !== "string" ||
+          !("discount" in result.coupon) || typeof result.coupon.discount !== "number") {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not apply this coupon.";
+        throw new Error(message);
+      }
+      setDiscount(result.coupon.discount);
+      setCouponApplied(result.coupon.code);
+      setCoupon(result.coupon.code);
+      setCouponMsg("Coupon applied successfully.");
+      window.sessionStorage.setItem(APPLIED_COUPON_STORAGE_KEY, result.coupon.code);
+    } catch (applyError) {
+      setCouponError(true);
+      setCouponMsg(applyError instanceof Error ? applyError.message : "Could not apply this coupon.");
+      if (window.sessionStorage.getItem(APPLIED_COUPON_STORAGE_KEY) === code) {
+        window.sessionStorage.removeItem(APPLIED_COUPON_STORAGE_KEY);
+      }
+    } finally {
+      setApplyingCoupon(false);
     }
   };
+
+  useEffect(() => {
+    if (loading || !user || restoredCoupon.current) return;
+    restoredCoupon.current = true;
+    const savedCode = window.sessionStorage.getItem(APPLIED_COUPON_STORAGE_KEY);
+    if (savedCode) {
+      setCoupon(savedCode);
+      void handleApplyCoupon(savedCode);
+    }
+  }, [loading, user]);
 
   const handleRemoveCoupon = () => {
     setDiscount(0);
     setCouponApplied("");
     setCoupon("");
     setCouponMsg("");
+    setCouponError(false);
+    window.sessionStorage.removeItem(APPLIED_COUPON_STORAGE_KEY);
   };
 
   const changeQuantity = async (itemId: number, quantity: number) => {
@@ -203,14 +245,13 @@ export function CartPage({ cart, loading, error, user, refreshCart, updateQuanti
               <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black text-foreground"><Tag size={13} className="text-emerald-700"/> Add a coupon</p>
               {!couponApplied ? (
                 <div className="flex gap-2">
-                  <input value={coupon} onChange={event => setCoupon(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === "Enter") handleApplyCoupon(); }} placeholder="Enter code" aria-label="Coupon code" className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs font-bold text-foreground outline-none focus:border-emerald-700"/>
-                  <button type="button" onClick={handleApplyCoupon} className="rounded-lg bg-[#087a51] px-3 py-2 text-xs font-black text-white">Apply</button>
+                  <input value={coupon} onChange={event => setCoupon(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === "Enter") void handleApplyCoupon(); }} placeholder="Enter code" aria-label="Coupon code" className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs font-bold text-foreground outline-none focus:border-emerald-700"/>
+                    <button type="button" onClick={() => void handleApplyCoupon()} disabled={applyingCoupon} className="rounded-lg bg-[#087a51] px-3 py-2 text-xs font-black text-white disabled:opacity-60">{applyingCoupon ? "Checking…" : "Apply"}</button>
                 </div>
               ) : (
                 <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">{couponApplied} applied</p>
               )}
-              {couponMsg && <p role="status" className={`mt-2 text-[10px] font-semibold ${couponMsg.includes("applied") ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600"}`}>{couponMsg}</p>}
-              {!couponApplied && <p className="mt-2 text-[9px] text-muted-foreground">Try SAVE500 or WELCOME200</p>}
+              {couponMsg && <p role={couponError ? "alert" : "status"} className={`mt-2 text-[10px] font-semibold ${couponError ? "text-rose-600" : "text-emerald-700 dark:text-emerald-400"}`}>{couponMsg}</p>}
             </div>
 
             <button type="button" onClick={() => setPage?.("checkout")} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#087a51] py-3.5 text-sm font-black text-white shadow-[0_8px_20px_rgba(8,122,81,0.18)] transition-colors hover:bg-[#066641]">
