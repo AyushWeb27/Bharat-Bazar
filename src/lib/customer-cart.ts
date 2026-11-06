@@ -66,7 +66,18 @@ function toProduct(row: RecordValue, variantTitle: string): Prod {
   const selectedStock = selectedVariant?.stock;
   const basePrice = Number(row.selling_price) || 0;
   const baseMrp = Number(row.mrp) || basePrice;
-  const price = selectedVariant?.offerPrice ?? basePrice;
+  const regularPrice = selectedVariant?.offerPrice ?? basePrice;
+  const dailyDiscountPercent = Number(row.daily_discount_percent) || 0;
+  const flashDiscountValue = Number(row.flash_discount_value) || 0;
+  const flashDiscount = dailyDiscountPercent > 0
+    ? 0
+    : row.flash_discount_type === "percent"
+      ? regularPrice * flashDiscountValue / 100
+      : row.flash_discount_type === "flat"
+        ? flashDiscountValue
+        : 0;
+  const dailyDiscount = regularPrice * dailyDiscountPercent / 100;
+  const price = Math.max(0, regularPrice - dailyDiscount - flashDiscount);
   const mrp = selectedVariant?.price ?? baseMrp;
   const imageId = Number(row.id);
   const gallery = parseArray(row.gallery_images);
@@ -95,8 +106,12 @@ function toProduct(row: RecordValue, variantTitle: string): Prod {
     freeShip: shipping.freeShip === true,
     inStock: available,
     stock: Number(selectedStock ?? row.stock) || 0,
-    tag: row.is_deal ? "Deal" : row.featured ? "Featured" : row.is_popular ? "Popular" : "",
-    tagClr: row.is_deal ? "#f97316" : "#009966",
+    tag: dailyDiscount > 0
+      ? "Deal of the Day"
+      : flashDiscount > 0
+      ? "Flash Sale"
+      : row.is_deal ? "Deal" : row.featured ? "Featured" : row.is_popular ? "Popular" : "",
+    tagClr: dailyDiscount > 0 ? "#e11d48" : flashDiscount > 0 ? "#ef4444" : row.is_deal ? "#f97316" : "#009966",
     img: row.main_image_url ? `/api/products/${imageId}/image` : "",
     img2: galleryImages[0] || (row.main_image_url ? `/api/products/${imageId}/image` : ""),
     galleryImages,
@@ -143,6 +158,9 @@ export async function loadCustomerCart(userId: number): Promise<CartItem[]> {
            p.subcategory, p.brand, p.mrp, p.selling_price, p.stock, p.sku,
            p.main_image_url, p.gallery_images, p.details, p.is_popular,
            p.is_deal, p.featured,
+           flash_sale.discount_type AS flash_discount_type,
+           flash_sale.discount_value AS flash_discount_value,
+           daily_deal.discount_percent AS daily_discount_percent,
            (
              p.status = 'active'
              AND EXISTS (
@@ -155,6 +173,25 @@ export async function loadCustomerCart(userId: number): Promise<CartItem[]> {
            ) AS product_active
     FROM customer_cart_items ci
     JOIN admin_products p ON p.id = ci.product_id
+    LEFT JOIN LATERAL (
+      SELECT sale.discount_type, sale.discount_value
+      FROM admin_flash_sales AS sale
+      JOIN admin_flash_sale_products AS linked ON linked.sale_id = sale.id
+      WHERE linked.product_id = p.id
+        AND sale.is_active = TRUE
+        AND sale.start_at <= CURRENT_TIMESTAMP
+        AND sale.end_at > CURRENT_TIMESTAMP
+      ORDER BY sale.start_at DESC, sale.id DESC
+      LIMIT 1
+    ) AS flash_sale ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT deal.discount_percent
+      FROM admin_daily_deals AS deal
+      WHERE deal.product_id = p.id
+        AND deal.deal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE
+        AND deal.is_active = TRUE
+      LIMIT 1
+    ) AS daily_deal ON TRUE
     WHERE ci.user_id = ${userId}
     ORDER BY ci.created_at DESC, ci.id DESC
   `;
@@ -171,8 +208,30 @@ export async function loadOrderProduct(productId: number, variantTitle: string):
     SELECT p.id, p.name, p.short_description, p.full_description, p.category,
            p.subcategory, p.brand, p.mrp, p.selling_price, p.stock, p.sku,
            p.main_image_url, p.gallery_images, p.details, p.is_popular,
-           p.is_deal, p.featured, TRUE AS product_active
+           p.is_deal, p.featured, TRUE AS product_active,
+           flash_sale.discount_type AS flash_discount_type,
+           flash_sale.discount_value AS flash_discount_value,
+           daily_deal.discount_percent AS daily_discount_percent
     FROM admin_products p
+    LEFT JOIN LATERAL (
+      SELECT sale.discount_type, sale.discount_value
+      FROM admin_flash_sales AS sale
+      JOIN admin_flash_sale_products AS linked ON linked.sale_id = sale.id
+      WHERE linked.product_id = p.id
+        AND sale.is_active = TRUE
+        AND sale.start_at <= CURRENT_TIMESTAMP
+        AND sale.end_at > CURRENT_TIMESTAMP
+      ORDER BY sale.start_at DESC, sale.id DESC
+      LIMIT 1
+    ) AS flash_sale ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT deal.discount_percent
+      FROM admin_daily_deals AS deal
+      WHERE deal.product_id = p.id
+        AND deal.deal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE
+        AND deal.is_active = TRUE
+      LIMIT 1
+    ) AS daily_deal ON TRUE
     WHERE p.id = ${productId}
       AND p.status = 'active'
       AND EXISTS (

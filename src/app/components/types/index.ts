@@ -82,6 +82,8 @@ export type Prod = {
   warranty?: string;
   deliveryDays?: string;
   swatches?: string[];
+  flashSaleName?: string;
+  flashSaleEndDate?: string;
 };
 
 export type CartItem = {

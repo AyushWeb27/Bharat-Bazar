@@ -17,6 +17,8 @@
     "db:products": "node --env-file=.env scripts/setup-products.mjs",
     "db:cart": "node --env-file=.env scripts/setup-cart-db.mjs",
     "db:orders": "node --env-file=.env scripts/setup-orders-db.mjs",
+    "db:flash-sales": "npm run db:products && node --env-file=.env scripts/setup-flash-sales-db.mjs",
+    "db:deal-of-day": "npm run db:categories && npm run db:products && node --env-file=.env scripts/setup-deal-of-day-db.mjs",
     "db:taxes": "node --env-file=.env scripts/setup-taxes.mjs",
     "db:banners": "node --env-file=.env scripts/setup-banners.mjs",
     "admin:add": "node --env-file=.env scripts/create-admin.mjs",

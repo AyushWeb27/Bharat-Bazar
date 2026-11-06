@@ -373,6 +373,27 @@ export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBa
 
           {/* Price */}
           <div className="space-y-1 border-y border-border py-5">
+            {p.tag === "Flash Sale" && (
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-red-600 dark:bg-red-950/40 dark:text-red-300">
+                <span aria-hidden="true">⚡</span>
+                {p.flashSaleName || "Flash Sale"} Price
+              </div>
+            )}
+            {p.tag === "Flash Sale" && p.flashSaleEndDate && (
+              <p className="mb-2 text-[11px] font-semibold text-red-600 dark:text-red-300">
+                Offer ends {new Date(p.flashSaleEndDate).toLocaleString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </p>
+            )}
+            {p.tag === "Deal of the Day" && (
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+                <span aria-hidden="true">🎁</span> Deal of the Day Price
+              </div>
+            )}
             <div className="flex items-baseline gap-3">
               <motion.span
                 key={currentPrice}

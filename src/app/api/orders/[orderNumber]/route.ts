@@ -27,10 +27,26 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     const orders = await sql`
       SELECT customer_orders.order_number, customer_orders.status, payment_method, payment_status,
              subtotal, tax_amount, shipping_amount, total_amount,
-             shipping_address, created_at, updated_at,
+             shipping_address, created_at, customer_orders.updated_at,
              order_return.status AS return_status,
              order_return.requested_at AS return_requested_at,
              order_return.reason AS return_reason,
+             COALESCE((
+               SELECT JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'status', return_history.status,
+                   'changedAt', return_history.changed_at
+                 )
+                 ORDER BY return_history.changed_at, return_history.id
+               )
+               FROM customer_order_return_status_history return_history
+               WHERE return_history.return_id = order_return.id
+             ), CASE
+               WHEN order_return.id IS NULL THEN '[]'::json
+               ELSE JSON_BUILD_ARRAY(
+                 JSON_BUILD_OBJECT('status', order_return.status, 'changedAt', order_return.updated_at)
+               )
+             END) AS return_status_history,
              (
                LOWER(REPLACE(REPLACE(BTRIM(customer_orders.status), ' ', '_'), '-', '_'))
                  IN ('delivered', 'completed')

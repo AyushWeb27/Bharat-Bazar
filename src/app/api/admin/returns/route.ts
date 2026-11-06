@@ -4,7 +4,18 @@ import { requireActiveBrandAdmin } from "@/lib/brands";
 
 export const dynamic = "force-dynamic";
 
-const RETURN_STATUSES = ["requested", "approved", "rejected", "received", "refunded", "cancelled"] as const;
+const RETURN_STATUSES = [
+  "requested",
+  "approved",
+  "pickup_scheduled",
+  "product_picked_up",
+  "warehouse_received",
+  "quality_inspection",
+  "refund_initiated",
+  "refund_completed",
+  "rejected",
+  "cancelled",
+] as const;
 type ReturnStatus = (typeof RETURN_STATUSES)[number];
 
 function failure(message: string, status: number) {
@@ -29,13 +40,39 @@ export async function GET(req: NextRequest) {
         r.requested_at,
         r.updated_at,
         o.order_number,
+        o.status AS order_status,
         o.total_amount,
         o.payment_method,
         o.payment_status,
         u.name AS customer_name,
         u.email AS customer_email,
         COALESCE(NULLIF(o.shipping_address ->> 'phone', ''), u.phone, '') AS customer_phone,
-        order_items.items
+        order_items.items,
+        COALESCE((
+          SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'status', order_history.status,
+              'changedAt', order_history.changed_at,
+              'reason', order_history.reason
+            ) ORDER BY order_history.changed_at, order_history.id
+          )
+          FROM customer_order_status_history AS order_history
+          WHERE order_history.order_id = o.id
+        ), JSON_BUILD_ARRAY(
+          JSON_BUILD_OBJECT('status', o.status, 'changedAt', o.updated_at)
+        )) AS order_status_history,
+        COALESCE((
+          SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'status', return_history.status,
+              'changedAt', return_history.changed_at
+            ) ORDER BY return_history.changed_at, return_history.id
+          )
+          FROM customer_order_return_status_history AS return_history
+          WHERE return_history.return_id = r.id
+        ), JSON_BUILD_ARRAY(
+          JSON_BUILD_OBJECT('status', r.status, 'changedAt', r.updated_at)
+        )) AS return_status_history
       FROM customer_order_returns r
       JOIN customer_orders o ON o.id = r.order_id
       JOIN users u ON u.id = o.user_id
@@ -62,6 +99,7 @@ export async function GET(req: NextRequest) {
     const returns = rows.map(row => ({
       id: Number(row.id),
       orderId: String(row.order_number),
+      orderStatus: String(row.order_status || ""),
       customer: String(row.customer_name || "Customer"),
       email: String(row.customer_email || ""),
       phone: String(row.customer_phone || ""),
@@ -71,6 +109,8 @@ export async function GET(req: NextRequest) {
       paymentStatus: String(row.payment_status || ""),
       reason: String(row.reason || ""),
       status: String(row.status),
+      orderStatusHistory: Array.isArray(row.order_status_history) ? row.order_status_history : [],
+      returnStatusHistory: Array.isArray(row.return_status_history) ? row.return_status_history : [],
       requestedAt: row.requested_at instanceof Date
         ? row.requested_at.toISOString()
         : String(row.requested_at),
@@ -112,17 +152,34 @@ export async function PATCH(req: NextRequest) {
     }
 
     const rows = await sql`
-      UPDATE customer_order_returns
-      SET status = ${status},
-          updated_by_admin_id = ${adminId},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${id}
-        AND (
-          (status = 'requested' AND ${status} IN ('approved', 'rejected', 'cancelled'))
-          OR (status = 'approved' AND ${status} IN ('received', 'refunded', 'cancelled'))
-          OR (status = 'received' AND ${status} = 'refunded')
+      WITH changed AS (
+        UPDATE customer_order_returns
+        SET status = ${status},
+            updated_by_admin_id = ${adminId},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+          AND (
+            (status = 'requested' AND ${status} IN ('approved', 'rejected', 'cancelled'))
+            OR (status = 'approved' AND ${status} IN ('pickup_scheduled', 'cancelled'))
+            OR (status = 'pickup_scheduled' AND ${status} IN ('product_picked_up', 'cancelled'))
+            OR (status = 'product_picked_up' AND ${status} = 'warehouse_received')
+            OR (status = 'warehouse_received' AND ${status} = 'quality_inspection')
+            OR (status = 'quality_inspection' AND ${status} IN ('refund_initiated', 'rejected'))
+            OR (status = 'refund_initiated' AND ${status} = 'refund_completed')
+          )
+        RETURNING id, status, updated_by_admin_id, updated_at
+      ),
+      logged AS (
+        INSERT INTO customer_order_return_status_history (
+          return_id, status, changed_by_admin_id, changed_at
         )
-      RETURNING id, status, updated_at
+        SELECT id, status, updated_by_admin_id, updated_at
+        FROM changed
+        RETURNING return_id, status, changed_at
+      )
+      SELECT changed.id, changed.status, changed.updated_at, logged.changed_at AS changed_at
+      FROM changed
+      JOIN logged ON logged.return_id = changed.id
     `;
 
     if (!rows.length) {
@@ -137,6 +194,9 @@ export async function PATCH(req: NextRequest) {
         returnRequest: {
           id: Number(rows[0].id),
           status: String(rows[0].status),
+          changedAt: rows[0].changed_at instanceof Date
+            ? rows[0].changed_at.toISOString()
+            : String(rows[0].changed_at),
           updatedAt: rows[0].updated_at instanceof Date
             ? rows[0].updated_at.toISOString()
             : String(rows[0].updated_at),

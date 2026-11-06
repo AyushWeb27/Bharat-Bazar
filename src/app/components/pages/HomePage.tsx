@@ -3,15 +3,15 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import {
   ArrowRight, Bell, ChevronLeft, ChevronRight, Zap, Truck, Package,
-  RefreshCw, Shield, Headphones,
+  RefreshCw, Shield, Headphones, Clock3, Gift, ShoppingBag, Sparkles,
 } from "lucide-react";
 import { HeroSlider } from "../HeroSlider/index";
 import { CardFlash } from "../cards/CardFlash";
 import { CardFeature } from "../cards/CardFeature";
 import { CardGrid } from "../cards/CardGrid";
 import { TimeSeg } from "../ui/TimeSeg";
-import { useCountdown } from "../hooks/useCountdown";
 import { G, PRODUCTS } from "../data/index";
+import { fmt } from "../utils/format";
 import type { Prod, Page } from "../types/index";
 
 type StoreCategory = {
@@ -45,6 +45,121 @@ type StoreStripBanner = {
   gradientFrom: string;
   gradientTo: string;
 };
+
+type StoreFlashSale = {
+  id: number;
+  name: string;
+  endDate: string;
+  products: Prod[];
+};
+
+type StoreDailyDeal = {
+  dealId: number;
+  featured: boolean;
+  product: Prod;
+};
+
+function isFlashSaleProduct(value: unknown): value is Prod {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const product = value as Record<string, unknown>;
+  return typeof product.id === "number" && typeof product.name === "string" &&
+    typeof product.brand === "string" && typeof product.price === "number" &&
+    typeof product.mrp === "number" && typeof product.off === "number" &&
+    typeof product.img === "string" && typeof product.inStock === "boolean" &&
+    typeof product.rating === "number" && typeof product.reviews === "number" &&
+    typeof product.cat === "string" && typeof product.cod === "boolean" &&
+    typeof product.emi === "boolean" && typeof product.freeShip === "boolean" &&
+    typeof product.tag === "string" && typeof product.tagClr === "string" &&
+    typeof product.img2 === "string" && typeof product.desc === "string" &&
+    Array.isArray(product.sizes) && Boolean(product.spec && typeof product.spec === "object");
+}
+
+function isStoreFlashSale(value: unknown): value is StoreFlashSale {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const sale = value as Record<string, unknown>;
+  return typeof sale.id === "number" && typeof sale.name === "string" &&
+    typeof sale.endDate === "string" && !Number.isNaN(Date.parse(sale.endDate)) &&
+    Array.isArray(sale.products) && sale.products.every(isFlashSaleProduct);
+}
+
+function isStoreDailyDeal(value: unknown): value is StoreDailyDeal {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const deal = value as Record<string, unknown>;
+  return typeof deal.dealId === "number" && typeof deal.featured === "boolean" &&
+    isFlashSaleProduct(deal.product);
+}
+
+function FlashSaleCountdown({ endDate }: { endDate: string }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const remaining = Math.max(0, new Date(endDate).getTime() - now);
+  const hours = Math.floor(remaining / 3_600_000);
+  const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+  const seconds = Math.floor((remaining % 60_000) / 1000);
+  return (
+    <div className="flex items-center gap-0.5">
+      <TimeSeg v={String(hours).padStart(2, "0")} u="hrs" />
+      <span className="mb-5 text-lg font-black text-white">:</span>
+      <TimeSeg v={String(minutes).padStart(2, "0")} u="min" />
+      <span className="mb-5 text-lg font-black text-white">:</span>
+      <TimeSeg v={String(seconds).padStart(2, "0")} u="sec" />
+    </div>
+  );
+}
+
+function DealOfDayCountdown() {
+  const [remaining, setRemaining] = useState({ hours: 0, minutes: 0, seconds: 0 });
+
+  useEffect(() => {
+    const update = () => {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date());
+      const values = Object.fromEntries(parts.map(part => [part.type, Number(part.value)]));
+      const secondsLeft = Math.max(
+        0,
+        86_400 - (values.hour * 3600 + values.minute * 60 + values.second)
+      );
+      setRemaining({
+        hours: Math.floor(secondsLeft / 3600),
+        minutes: Math.floor((secondsLeft % 3600) / 60),
+        seconds: secondsLeft % 60,
+      });
+    };
+
+    update();
+    const interval = window.setInterval(update, 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-1.5" aria-label="Deal ends in">
+      {[
+        { value: remaining.hours, label: "HRS" },
+        { value: remaining.minutes, label: "MIN" },
+        { value: remaining.seconds, label: "SEC" },
+      ].map(({ value, label }, index) => (
+        <div key={label} className="flex items-center gap-1.5">
+          {index > 0 && <span className="mb-4 text-lg font-black text-white/50">:</span>}
+          <div className="min-w-[48px] rounded-xl border border-white/10 bg-white/10 px-2 py-1.5 text-center backdrop-blur">
+            <p className="font-mono text-lg font-black leading-none text-white tabular-nums">
+              {String(value).padStart(2, "0")}
+            </p>
+            <p className="mt-1 text-[8px] font-bold tracking-widest text-white/55">{label}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function isStoreCategory(value: unknown): value is StoreCategory {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -87,13 +202,21 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
   const [brandRailPaused, setBrandRailPaused] = useState(false);
   const [stripBanners, setStripBanners] = useState<StoreStripBanner[]>([]);
   const [stripRailPaused, setStripRailPaused] = useState(false);
+  const [flashSale, setFlashSale] = useState<StoreFlashSale | null>(null);
+  const [flashSaleLoading, setFlashSaleLoading] = useState(true);
+  const [flashSaleError, setFlashSaleError] = useState("");
+  const [dailyDeals, setDailyDeals] = useState<StoreDailyDeal[]>([]);
+  const [dailyDealsLoading, setDailyDealsLoading] = useState(true);
+  const [dailyDealsError, setDailyDealsError] = useState("");
   const categoriesRailRef = useRef<HTMLDivElement>(null);
   const brandsRailRef = useRef<HTMLDivElement>(null);
   const stripRailRef = useRef<HTMLDivElement>(null);
   const stripDragRef = useRef<{ pointerId: number; startX: number; startScrollLeft: number; dragged: boolean } | null>(null);
-  const cd = useCountdown(5*3600+47*60+18);
   const featured3 = PRODUCTS.slice(0, 3);
-  const flashDeals = [PRODUCTS[0], PRODUCTS[4], PRODUCTS[7], PRODUCTS[8], PRODUCTS[9], PRODUCTS[10]];
+  const featuredDailyDeal = dailyDeals.find(deal => deal.featured) || dailyDeals[0];
+  const dealOfDay = featuredDailyDeal?.product;
+  const dealDiscount = dealOfDay?.off || 0;
+  const otherDailyDeals = dailyDeals.filter(deal => deal !== featuredDailyDeal);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -120,6 +243,78 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
     }
     void loadCategories();
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadDailyDeals() {
+      try {
+        const response = await fetch("/api/deal-of-day", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" ||
+            !("success" in result) || result.success !== true ||
+            !("deals" in result) || !Array.isArray(result.deals) ||
+            !result.deals.every(isStoreDailyDeal)) {
+          const message = result && typeof result === "object" && "message" in result &&
+            typeof result.message === "string" ? result.message : "Failed to load today's deals.";
+          throw new Error(message);
+        }
+        setDailyDeals(result.deals);
+        setDailyDealsError("");
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load storefront Deal of the Day:", error);
+          setDailyDealsError(error instanceof Error ? error.message : "Failed to load today's deals.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setDailyDealsLoading(false);
+      }
+    }
+    void loadDailyDeals();
+    const refreshInterval = window.setInterval(() => void loadDailyDeals(), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(refreshInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadFlashSale() {
+      try {
+        const response = await fetch("/api/flash-sales", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" ||
+            !("success" in result) || result.success !== true ||
+            !("sale" in result) ||
+            (result.sale !== null && !isStoreFlashSale(result.sale))) {
+          const message = result && typeof result === "object" && "message" in result &&
+            typeof result.message === "string" ? result.message : "Failed to load flash sale.";
+          throw new Error(message);
+        }
+        setFlashSale(result.sale as StoreFlashSale | null);
+        setFlashSaleError("");
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load storefront flash sale:", error);
+          setFlashSaleError(error instanceof Error ? error.message : "Failed to load flash sale.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setFlashSaleLoading(false);
+      }
+    }
+    void loadFlashSale();
+    const refreshInterval = window.setInterval(() => void loadFlashSale(), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(refreshInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -425,22 +620,203 @@ export function HomePage({ onAdd, onWish, wish, onView, setPage }: {
       )}
 
       {/* ── FLASH SALE ── */}
-      <section className="rounded-2xl overflow-hidden" style={{ background:"linear-gradient(135deg,#000 0%,#111 40%,#001f14 100%)" }}>
-        <div className="p-5 md:p-6">
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5"><Zap size={18} className="text-yellow-400 fill-yellow-400"/><span className="text-white font-black text-xl">⚡ Flash Sale</span></div>
-              <div className="flex items-center gap-1.5 bg-white/10 rounded-xl px-3 py-1.5">
-                <div className="flex items-center gap-0.5"><TimeSeg v={cd.h} u="hrs"/><span className="text-white font-black text-lg mb-5">:</span><TimeSeg v={cd.m} u="min"/><span className="text-white font-black text-lg mb-5">:</span><TimeSeg v={cd.s} u="sec"/></div>
+      {flashSaleLoading ? (
+        <section aria-label="Loading flash sale" className="h-48 animate-pulse rounded-2xl bg-zinc-900" />
+      ) : flashSaleError ? (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {flashSaleError}
+        </p>
+      ) : flashSale && flashSale.products.length > 0 ? (
+        <section className="overflow-hidden rounded-2xl"
+          style={{ background: "linear-gradient(135deg,#000 0%,#111 40%,#001f14 100%)" }}>
+          <div className="p-5 md:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Zap size={18} className="fill-yellow-400 text-yellow-400" />
+                  <span className="text-xl font-black text-white">⚡ {flashSale.name}</span>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5">
+                  <FlashSaleCountdown endDate={flashSale.endDate} />
+                </div>
+              </div>
+              <button onClick={() => setPage("products")}
+                className="flex items-center gap-1 text-xs font-black transition-opacity hover:opacity-80"
+                style={{ color: G }}>
+                View All <ArrowRight size={11} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              {flashSale.products.map(product => (
+                <CardFlash key={product.id} p={product} onAdd={onAdd} onView={onView} />
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {/* ── DEAL OF THE DAY ── */}
+      {dailyDealsLoading ? (
+        <section aria-label="Loading Deal of the Day" className="h-80 animate-pulse rounded-2xl bg-emerald-950" />
+      ) : dailyDealsError ? (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {dailyDealsError}
+        </p>
+      ) : dealOfDay ? (
+      <section className="relative isolate overflow-hidden rounded-[1.75rem] border border-emerald-900/10 bg-[#071b14] shadow-xl">
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_15%_25%,rgba(0,230,118,0.22),transparent_38%),radial-gradient(ellipse_at_90%_85%,rgba(250,204,21,0.13),transparent_34%)]" />
+        <div className="grid min-h-[390px] lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden px-6 py-8 sm:px-10 lg:min-h-[430px]">
+            <div className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-200/10 sm:h-80 sm:w-80" />
+            <div className="absolute left-1/2 top-1/2 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400/10 blur-2xl sm:h-64 sm:w-64" />
+            <motion.button
+              type="button"
+              aria-label={`View Deal of the Day: ${dealOfDay.name}`}
+              initial={{ opacity: 0, y: 12, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.5 }}
+              onClick={() => onView(dealOfDay)}
+              className="relative z-10 h-64 w-full max-w-[390px] cursor-pointer bg-transparent text-left sm:h-80 lg:h-[350px]"
+            >
+              <img
+                src={dealOfDay.img}
+                alt={dealOfDay.name}
+                className="h-full w-full object-contain drop-shadow-[0_30px_35px_rgba(0,0,0,0.5)]"
+              />
+              <span className="absolute left-2 top-4 inline-flex rotate-[-8deg] items-center gap-1.5 rounded-full bg-rose-500 px-4 py-2 text-xs font-black uppercase tracking-wide text-white shadow-lg shadow-rose-950/30">
+                <Gift size={14} /> Deal of the Day
+              </span>
+              {dealDiscount > 0 && (
+                <span className="absolute bottom-2 right-1 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-center shadow-lg backdrop-blur-md">
+                  <span className="block text-2xl font-black leading-none text-amber-300">{dealDiscount}%</span>
+                  <span className="mt-1 block text-[9px] font-black uppercase tracking-widest text-white/75">off today</span>
+                </span>
+              )}
+            </motion.button>
+          </div>
+
+          <div className="flex flex-col justify-center px-6 pb-8 sm:px-10 lg:px-8 lg:py-12 xl:px-12">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">
+                <Sparkles size={13} className="text-amber-300" /> Today&apos;s handpicked deal
+              </span>
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-white/55">
+                <Clock3 size={13} className="text-amber-300" /> Ends in
+                <DealOfDayCountdown />
               </div>
             </div>
-            <button onClick={() => setPage("products")} className="text-xs font-black flex items-center gap-1 hover:opacity-80 transition-opacity" style={{ color:G }}>View All <ArrowRight size={11}/></button>
+
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-300/70">{dealOfDay.brand}</p>
+            <h2 className="mt-2 max-w-xl text-2xl font-black leading-tight text-white sm:text-3xl lg:text-4xl">
+              {dealOfDay.name}
+            </h2>
+            <p className="mt-3 max-w-lg text-sm leading-6 text-white/60">
+              A standout pick at a special price for today. Don&apos;t miss your chance to bring it home for less.
+            </p>
+
+            <div className="mt-6 flex flex-wrap items-end gap-x-4 gap-y-2">
+              <span className="text-3xl font-black tracking-tight text-emerald-300 sm:text-4xl">{fmt(dealOfDay.price)}</span>
+              <span className="pb-1 text-base font-semibold text-white/40 line-through">{fmt(dealOfDay.mrp)}</span>
+              {dealDiscount > 0 && (
+                <span className="mb-1 rounded-lg bg-amber-300 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-950">
+                  Save {fmt(dealOfDay.mrp - dealOfDay.price)}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-6 max-w-md">
+              <div className="mb-2 flex items-center justify-between text-[10px] font-bold">
+                <span className="inline-flex items-center gap-1.5 text-white/60">
+                  <ShoppingBag size={12} /> Availability
+                </span>
+                <span className="text-amber-200">
+                  {dealOfDay.inStock ? `${dealOfDay.stock ?? 0} in stock` : "Out of stock"}
+                </span>
+              </div>
+              <p className="text-xs text-white/50">Special price available until midnight (India time).</p>
+            </div>
+
+            <div className="mt-7 flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={!dealOfDay.inStock}
+                onClick={() => onAdd(dealOfDay)}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-emerald-400 px-6 py-3 text-sm font-black text-emerald-950 shadow-lg shadow-emerald-950/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ShoppingBag size={16} /> {dealOfDay.inStock ? "Add to Cart" : "Out of Stock"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onView(dealOfDay)}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-3 text-sm font-bold text-white"
+              >
+                Explore Deal <ArrowRight size={15} />
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] font-medium text-white/40">Offer valid for today (India time).</p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {flashDeals.map(p => <CardFlash key={p.id} p={p} onAdd={onAdd} onView={onView}/>)}
+        </div>
+        <div className="border-t border-white/10 bg-black/20 px-5 py-6 sm:px-8 lg:px-10">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-[0.22em] text-emerald-300/70">More picks for today</p>
+              <h3 className="mt-1 text-lg font-black text-white sm:text-xl">Today&apos;s extra deals</h3>
+            </div>
+            <span className="text-[10px] font-semibold text-white/45">Handpicked offers · Valid today</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {otherDailyDeals.map(({ dealId, product }, index) => {
+              const discount = product.off;
+              return (
+                <motion.article
+                  key={dealId}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.08 }}
+                  onClick={() => onView(product)}
+                  className="group flex min-w-0 cursor-pointer items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 transition-colors hover:border-emerald-300/30 hover:bg-white/[0.075]"
+                >
+                  <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-white/[0.06] sm:h-28 sm:w-28">
+                    <img
+                      src={product.img}
+                      alt={product.name}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    {discount > 0 && (
+                      <span className="absolute left-1.5 top-1.5 rounded-md bg-rose-500 px-1.5 py-1 text-[9px] font-black text-white">
+                        -{discount}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[9px] font-bold uppercase tracking-[0.15em] text-emerald-300/70">
+                      {product.brand}
+                    </p>
+                    <h4 className="mt-1 line-clamp-2 text-sm font-extrabold leading-snug text-white">
+                      {product.name}
+                    </h4>
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2">
+                      <span className="text-base font-black text-emerald-300">{fmt(product.price)}</span>
+                      {product.mrp > product.price && (
+                        <span className="text-[10px] font-semibold text-white/40 line-through">{fmt(product.mrp)}</span>
+                      )}
+                    </div>
+                    <button type="button" disabled={!product.inStock}
+                      onClick={event => { event.stopPropagation(); onAdd(product); }}
+                      className="mt-2 rounded-lg bg-emerald-400 px-2.5 py-1.5 text-[10px] font-black text-emerald-950 disabled:opacity-50">
+                      {product.inStock ? "Add to Cart" : "Out of Stock"}
+                    </button>
+                  </div>
+                  <span aria-hidden="true" className="mr-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 text-emerald-200 transition-all group-hover:border-emerald-300/30 group-hover:bg-emerald-300/10 sm:flex">
+                    <ArrowRight size={14} />
+                  </span>
+                </motion.article>
+              );
+            })}
           </div>
         </div>
       </section>
+      ) : null}
 
       {/* ── FEATURED (CardFeature) ── */}
       <section>

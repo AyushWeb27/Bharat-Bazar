@@ -25,13 +25,37 @@ export async function GET(_req: Request, { params }: RouteContext) {
       SELECT p.id, p.name, p.short_description, p.full_description, p.category,
              p.subcategory, p.brand, p.mrp, p.selling_price, p.stock, p.sku,
              p.main_image_url, p.gallery_images, p.details, p.is_popular,
-             p.is_deal, p.featured
+             p.is_deal, p.featured,
+             flash_sale.name AS flash_sale_name,
+             flash_sale.end_at AS flash_sale_end_at,
+             flash_sale.discount_type AS flash_discount_type,
+             flash_sale.discount_value AS flash_discount_value,
+             daily_deal.discount_percent AS daily_discount_percent
       FROM admin_products p
       JOIN admin_categories c
         ON LOWER(TRIM(c.name)) = LOWER(TRIM(p.category))
         AND c.active = TRUE
       JOIN admin_group_categories g
         ON g.id = c.group_id AND g.active = TRUE
+      LEFT JOIN LATERAL (
+        SELECT sale.name, sale.end_at, sale.discount_type, sale.discount_value
+        FROM admin_flash_sales AS sale
+        JOIN admin_flash_sale_products AS linked ON linked.sale_id = sale.id
+        WHERE linked.product_id = p.id
+          AND sale.is_active = TRUE
+          AND sale.start_at <= CURRENT_TIMESTAMP
+          AND sale.end_at > CURRENT_TIMESTAMP
+        ORDER BY sale.start_at DESC, sale.id DESC
+        LIMIT 1
+      ) AS flash_sale ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT deal.discount_percent
+        FROM admin_daily_deals AS deal
+        WHERE deal.product_id = p.id
+          AND deal.deal_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::DATE
+          AND deal.is_active = TRUE
+        LIMIT 1
+      ) AS daily_deal ON TRUE
       WHERE p.id = ${id} AND p.status = 'active'
       LIMIT 1
     `;
@@ -50,8 +74,19 @@ export async function GET(_req: Request, { params }: RouteContext) {
       return variant.title.trim() ? [variant.title.trim()] : [];
     });
     const productId = Number(row.id);
-    const price = Number(row.selling_price) || 0;
-    const mrp = Number(row.mrp) || price;
+    const regularPrice = Number(row.selling_price) || 0;
+    const dailyDiscountPercent = Number(row.daily_discount_percent) || 0;
+    const flashDiscountValue = Number(row.flash_discount_value) || 0;
+    const flashDiscount = dailyDiscountPercent > 0
+      ? 0
+      : row.flash_discount_type === "percent"
+        ? regularPrice * flashDiscountValue / 100
+        : row.flash_discount_type === "flat"
+          ? flashDiscountValue
+          : 0;
+    const dailyDiscount = regularPrice * dailyDiscountPercent / 100;
+    const price = Math.max(0, regularPrice - dailyDiscount - flashDiscount);
+    const mrp = Number(row.mrp) || regularPrice;
     const variants = rawVariants.flatMap((variant, index) => {
       if (!isRecord(variant) || variant.status === "Inactive" || typeof variant.title !== "string" || !variant.title.trim()) {
         return [];
@@ -59,7 +94,19 @@ export async function GET(_req: Request, { params }: RouteContext) {
       const rawPrice = typeof variant.price === "number" ? variant.price : Number(variant.price);
       const rawOffer = typeof variant.offerPrice === "number" ? variant.offerPrice : Number(variant.offerPrice);
       const vMrp = Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : mrp;
-      const vOffer = Number.isFinite(rawOffer) && rawOffer > 0 ? rawOffer : (Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : price);
+      const regularOffer = Number.isFinite(rawOffer) && rawOffer > 0
+        ? rawOffer
+        : Number.isFinite(rawPrice) && rawPrice > 0
+          ? rawPrice
+          : regularPrice;
+      const variantDiscount = dailyDiscountPercent > 0
+        ? regularOffer * dailyDiscountPercent / 100
+        : row.flash_discount_type === "percent"
+          ? regularOffer * flashDiscountValue / 100
+          : row.flash_discount_type === "flat"
+            ? flashDiscountValue
+            : 0;
+      const vOffer = Math.max(0, regularOffer - variantDiscount);
       const rawStock = typeof variant.stock === "number" ? variant.stock : Number(variant.stock);
       return [{
         id: typeof variant.id === "number" ? variant.id : index + 1,
@@ -107,8 +154,18 @@ export async function GET(_req: Request, { params }: RouteContext) {
           inStock: Number(row.stock) > 0,
           stock: Number(row.stock) || 0,
           sku: String(row.sku || ""),
-          tag: row.is_deal ? "Deal" : row.featured ? "Featured" : row.is_popular ? "Popular" : "",
-          tagClr: row.is_deal ? "#f97316" : "#009966",
+          tag: dailyDiscount > 0
+            ? "Deal of the Day"
+            : flashDiscount > 0
+            ? "Flash Sale"
+            : row.is_deal ? "Deal" : row.featured ? "Featured" : row.is_popular ? "Popular" : "",
+          tagClr: dailyDiscount > 0 ? "#e11d48" : flashDiscount > 0 ? "#ef4444" : row.is_deal ? "#f97316" : "#009966",
+          flashSaleName: flashDiscount > 0 ? String(row.flash_sale_name || "Flash Sale") : "",
+          flashSaleEndDate: flashDiscount > 0 && row.flash_sale_end_at
+            ? (row.flash_sale_end_at instanceof Date
+              ? row.flash_sale_end_at.toISOString()
+              : new Date(String(row.flash_sale_end_at)).toISOString())
+            : "",
           img: mainImage,
           img2: galleryImages[0] || mainImage,
           galleryImages,

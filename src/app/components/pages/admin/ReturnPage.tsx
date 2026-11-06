@@ -4,16 +4,29 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import {
   RotateCcw, CheckCircle2, XCircle, IndianRupee, Clock, Eye,
-  Package, RefreshCw, Truck, Search,
+  RefreshCw, Truck, Search, CalendarDays, PackageCheck, ClipboardCheck,
 } from "lucide-react";
 import { Modal, PageHeader, StatCard, SectionCard, SearchBar } from "./shared/ui";
 import { G, fmt } from "./shared/constants";
 
-type ReturnStatus = "requested" | "approved" | "rejected" | "received" | "refunded" | "cancelled";
+type ReturnStatus =
+  | "requested"
+  | "approved"
+  | "pickup_scheduled"
+  | "product_picked_up"
+  | "warehouse_received"
+  | "quality_inspection"
+  | "refund_initiated"
+  | "refund_completed"
+  | "rejected"
+  | "cancelled";
 type ReturnProduct = { product: string; variant: string; quantity: number };
+type OrderTimelineEvent = { status: string; changedAt: string; reason?: string | null };
+type ReturnTimelineEvent = { status: ReturnStatus; changedAt: string };
 type ReturnRequest = {
   id: number;
   orderId: string;
+  orderStatus: string;
   customer: string;
   email: string;
   phone: string;
@@ -23,30 +36,53 @@ type ReturnRequest = {
   paymentStatus: string;
   reason: string;
   status: ReturnStatus;
+  orderStatusHistory: OrderTimelineEvent[];
+  returnStatusHistory: ReturnTimelineEvent[];
   requestedAt: string;
   updatedAt: string;
 };
 
 const STATUS_META: Record<ReturnStatus, { color: string; bg: string; icon: React.ElementType; label: string }> = {
-  requested: { color: "#f59e0b", bg: "#fffbeb", icon: Clock, label: "Requested" },
-  approved: { color: "#3b82f6", bg: "#eff6ff", icon: CheckCircle2, label: "Approved" },
+  requested: { color: "#f59e0b", bg: "#fffbeb", icon: Clock, label: "Return Request Placed" },
+  approved: { color: "#3b82f6", bg: "#eff6ff", icon: CheckCircle2, label: "Return Request Approved" },
+  pickup_scheduled: { color: "#6366f1", bg: "#eef2ff", icon: CalendarDays, label: "Pickup Scheduled" },
+  product_picked_up: { color: "#8b5cf6", bg: "#f5f3ff", icon: Truck, label: "Product Picked Up" },
+  warehouse_received: { color: "#0d9488", bg: "#f0fdfa", icon: PackageCheck, label: "Product Received at Warehouse" },
+  quality_inspection: { color: "#d97706", bg: "#fffbeb", icon: ClipboardCheck, label: "Quality Inspection" },
+  refund_initiated: { color: "#2563eb", bg: "#eff6ff", icon: IndianRupee, label: "Refund Initiated" },
+  refund_completed: { color: "#009966", bg: "#e8fff6", icon: CheckCircle2, label: "Refund Completed" },
   rejected: { color: "#ef4444", bg: "#fef2f2", icon: XCircle, label: "Rejected" },
-  received: { color: "#8b5cf6", bg: "#f5f3ff", icon: Package, label: "Item received" },
-  refunded: { color: "#009966", bg: "#e8fff6", icon: IndianRupee, label: "Refunded" },
   cancelled: { color: "#6b7280", bg: "#f3f4f6", icon: XCircle, label: "Cancelled" },
 };
 
 const STATUS_OPTIONS: Record<ReturnStatus, ReturnStatus[]> = {
   requested: ["approved", "rejected", "cancelled"],
-  approved: ["received", "refunded", "cancelled"],
-  received: ["refunded"],
+  approved: ["pickup_scheduled", "cancelled"],
+  pickup_scheduled: ["product_picked_up", "cancelled"],
+  product_picked_up: ["warehouse_received"],
+  warehouse_received: ["quality_inspection"],
+  quality_inspection: ["refund_initiated", "rejected"],
+  refund_initiated: ["refund_completed"],
+  refund_completed: [],
   rejected: [],
-  refunded: [],
   cancelled: [],
 };
 
 const STATUS_FILTERS: Array<ReturnStatus | "all"> = [
-  "all", "requested", "approved", "received", "refunded", "rejected", "cancelled",
+  "all", "requested", "approved", "pickup_scheduled", "product_picked_up",
+  "warehouse_received", "quality_inspection", "refund_initiated", "refund_completed",
+  "rejected", "cancelled",
+];
+
+const RETURN_STEPS: ReturnStatus[] = [
+  "requested",
+  "approved",
+  "pickup_scheduled",
+  "product_picked_up",
+  "warehouse_received",
+  "quality_inspection",
+  "refund_initiated",
+  "refund_completed",
 ];
 
 function isReturnProduct(value: unknown): value is ReturnProduct {
@@ -62,6 +98,7 @@ function isReturnRequest(value: unknown): value is ReturnRequest {
   const request = value as Record<string, unknown>;
   return typeof request.id === "number" &&
     typeof request.orderId === "string" &&
+  typeof request.orderStatus === "string" &&
     typeof request.customer === "string" &&
     typeof request.email === "string" &&
     typeof request.phone === "string" &&
@@ -71,6 +108,19 @@ function isReturnRequest(value: unknown): value is ReturnRequest {
     typeof request.paymentStatus === "string" &&
     typeof request.reason === "string" &&
     typeof request.status === "string" && request.status in STATUS_META &&
+    Array.isArray(request.orderStatusHistory) && request.orderStatusHistory.every(event =>
+      Boolean(event) &&
+      typeof event === "object" &&
+      typeof event.status === "string" &&
+      typeof event.changedAt === "string" &&
+      (event.reason === undefined || typeof event.reason === "string" || event.reason === null)
+    ) &&
+    Array.isArray(request.returnStatusHistory) && request.returnStatusHistory.every(event =>
+      Boolean(event) &&
+      typeof event === "object" &&
+      typeof event.status === "string" && event.status in STATUS_META &&
+      typeof event.changedAt === "string"
+    ) &&
     typeof request.requestedAt === "string" &&
     typeof request.updatedAt === "string";
 }
@@ -80,8 +130,24 @@ function formatDate(value: string) {
   return Number.isFinite(date.getTime())
     ? date.toLocaleString("en-IN", {
         day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
-      })
+      timeZone: "Asia/Kolkata",
+    })
     : "Date unavailable";
+}
+
+function formatStatusLabel(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const labels: Record<string, string> = {
+    placed: "Pending",
+    pending: "Pending",
+    confirmed: "Received",
+    processing: "Processed",
+    in_transit: "Shipped",
+    out_for_delivery: "Out For Delivery",
+    completed: "Delivered",
+    canceled: "Cancelled",
+  };
+  return labels[normalized] || normalized.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase());
 }
 
 export function ReturnPage() {
@@ -144,8 +210,8 @@ export function ReturnPage() {
   const counts = useMemo(() => ({
     requested: items.filter(item => item.status === "requested").length,
     approved: items.filter(item => item.status === "approved").length,
-    resolved: items.filter(item => ["refunded", "rejected", "cancelled"].includes(item.status)).length,
-    refunded: items.filter(item => item.status === "refunded").reduce((total, item) => total + item.amount, 0),
+    resolved: items.filter(item => ["refund_completed", "rejected", "cancelled"].includes(item.status)).length,
+    refunded: items.filter(item => item.status === "refund_completed").reduce((total, item) => total + item.amount, 0),
   }), [items]);
 
   const reasonBreakdown = useMemo(() => {
@@ -179,10 +245,19 @@ export function ReturnPage() {
       }
 
       const updated = result.returnRequest as Record<string, unknown>;
-      if (updated.id !== item.id || updated.status !== status || typeof updated.updatedAt !== "string") {
+      if (updated.id !== item.id || updated.status !== status ||
+          typeof updated.updatedAt !== "string" || typeof updated.changedAt !== "string") {
         throw new Error("The return update response was invalid.");
       }
-      const next = { ...item, status, updatedAt: updated.updatedAt };
+      const next = {
+        ...item,
+        status,
+        updatedAt: updated.updatedAt,
+        returnStatusHistory: [
+          ...item.returnStatusHistory,
+          { status, changedAt: updated.changedAt },
+        ],
+      };
       setItems(previous => previous.map(current => current.id === item.id ? next : current));
       setDetail(current => current?.id === item.id ? next : current);
     } catch (updateError) {
@@ -300,29 +375,25 @@ export function ReturnPage() {
                   {item.updatedAt !== item.requestedAt && <span>Updated: {formatDate(item.updatedAt)}</span>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
-                  {actions.includes("approved") && (
-                    <button type="button" disabled={updatingId === item.id}
-                      onClick={() => void updateStatus(item, "approved")}
-                      className="rounded-xl px-3 py-2 text-[11px] font-black text-white disabled:opacity-50"
-                      style={{ background: G }}>Approve</button>
-                  )}
-                  {actions.includes("rejected") && (
-                    <button type="button" disabled={updatingId === item.id}
-                      onClick={() => void updateStatus(item, "rejected")}
-                      className="rounded-xl bg-red-500 px-3 py-2 text-[11px] font-black text-white disabled:opacity-50">Reject</button>
-                  )}
-                  {actions.includes("received") && (
-                    <button type="button" disabled={updatingId === item.id}
-                      onClick={() => void updateStatus(item, "received")}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-[11px] font-black text-white disabled:opacity-50">
-                      <Truck size={12} /> Mark item received</button>
-                  )}
-                  {actions.includes("refunded") && (
-                    <button type="button" disabled={updatingId === item.id}
-                      onClick={() => void updateStatus(item, "refunded")}
-                      className="rounded-xl px-3 py-2 text-[11px] font-black text-white disabled:opacity-50"
-                      style={{ background: G }}>Mark refunded</button>
-                  )}
+                  {actions.map(status => {
+                    const actionMeta = STATUS_META[status];
+                    const ActionIcon = actionMeta.icon;
+                    const label = status === "approved"
+                      ? "Approve"
+                      : status === "rejected"
+                        ? "Reject"
+                        : status === "cancelled"
+                          ? "Cancel return"
+                          : `Mark ${actionMeta.label}`;
+                    return (
+                      <button key={status} type="button" disabled={updatingId === item.id}
+                        onClick={() => void updateStatus(item, status)}
+                        className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-black text-white disabled:opacity-50"
+                        style={{ background: status === "rejected" || status === "cancelled" ? "#ef4444" : G }}>
+                        <ActionIcon size={12} /> {label}
+                      </button>
+                    );
+                  })}
                   <button type="button" onClick={() => { setDetail(item); setActionError(""); }}
                     className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:border-blue-200 hover:text-blue-600"
                     aria-label={`View return request ${item.id}`}>
@@ -385,6 +456,84 @@ export function ReturnPage() {
               <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">Customer reason</p>
               <p className="whitespace-pre-wrap text-sm text-gray-700">{detail.reason || "No reason provided"}</p>
             </div>
+            <section aria-label={`Order timeline for ${detail.orderId}`} className="rounded-xl border border-gray-200 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[10px] font-black uppercase tracking-wider text-gray-500">Order Timeline</h3>
+                <span className="text-[10px] text-gray-400">Placed {formatDate(detail.orderStatusHistory[0]?.changedAt || detail.requestedAt)}</span>
+              </div>
+              <div className="mt-4 space-y-0">
+                {detail.orderStatusHistory.map((event, index) => {
+                  const isCurrent = index === detail.orderStatusHistory.length - 1;
+                  return (
+                    <div key={`${event.status}-${event.changedAt}-${index}`} className="relative flex min-h-11 items-start gap-3">
+                      {index < detail.orderStatusHistory.length - 1 && (
+                        <span aria-hidden="true" className="absolute left-[9px] top-5 h-[calc(100%-5px)] w-0.5 bg-gray-200" />
+                      )}
+                      <span className={`relative z-10 mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 bg-white ${isCurrent ? "border-emerald-600" : "border-gray-300"}`} />
+                      <div className="pb-3">
+                        <p className="text-xs font-bold text-gray-800">
+                          {formatStatusLabel(event.status)}
+                          {isCurrent && <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Current status</span>}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-gray-400">{formatDate(event.changedAt)}</p>
+                        {event.reason && <p className="mt-0.5 text-[10px] text-gray-500">Reason: {event.reason}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+            <section aria-label={`Return tracking for ${detail.orderId}`} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[10px] font-black uppercase tracking-wider text-gray-600">Return Tracking Timeline</h3>
+                <span className="rounded-full px-2.5 py-1 text-[10px] font-black"
+                  style={{ color: STATUS_META[detail.status].color, background: STATUS_META[detail.status].bg }}>
+                  {STATUS_META[detail.status].label}
+                </span>
+              </div>
+              <div className="mt-4 space-y-0">
+                {RETURN_STEPS.map((status, index) => {
+                  const meta = STATUS_META[status];
+                  const EventIcon = meta.icon;
+                  const event = detail.returnStatusHistory.find(item => item.status === status);
+                  const isCurrent = detail.status === status;
+                  return (
+                    <div key={status} className="relative flex min-h-11 items-start gap-3">
+                      {index < RETURN_STEPS.length - 1 && (
+                        <span aria-hidden="true" className={`absolute left-[9px] top-5 h-[calc(100%-5px)] w-0.5 ${event ? "bg-amber-300" : "bg-gray-200"}`} />
+                      )}
+                      <span className="relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 bg-white"
+                        style={{ borderColor: event ? meta.color : "#d1d5db", color: event ? meta.color : "#9ca3af" }}>
+                        <EventIcon size={10} />
+                      </span>
+                      <div className="pb-3">
+                        <p className={`text-xs font-bold ${event ? "text-gray-800" : "text-gray-400"}`}>
+                          {meta.label}
+                          {isCurrent && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-900">Current status</span>}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-gray-400">{event ? formatDate(event.changedAt) : "Pending"}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {["rejected", "cancelled"].includes(detail.status) && (
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-red-400 bg-white text-red-500">
+                      <XCircle size={10} />
+                    </span>
+                    <div className="pb-3">
+                      <p className="text-xs font-bold text-red-600">
+                        {STATUS_META[detail.status].label}
+                        <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black text-red-700">Current status</span>
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-gray-400">
+                        {formatDate(detail.returnStatusHistory.find(event => event.status === detail.status)?.changedAt || detail.updatedAt)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
             <div className="grid grid-cols-1 gap-2 text-[11px] text-gray-500 sm:grid-cols-2">
               <p>Requested: {formatDate(detail.requestedAt)}</p>
               <p>Last updated: {formatDate(detail.updatedAt)}</p>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   AreaChart, Area, PieChart, Pie, Cell,
@@ -69,7 +69,6 @@ import { AdminProfilePage }        from "./admin/AdminProfilePage";
 
 import type { Page } from "../types/index";
 import { G, fmt, orderStatusMeta, card } from "./admin/shared/constants";
-import { revenueData, orderStatus, catRevData, recentOrders, topProducts, NOTIFICATIONS, INIT_CATS, INIT_SUBCATS, INIT_PRODUCTS, INIT_BRANDS, INIT_GROUPS } from "./admin/shared/data";
 import { Toggle, StatusPill, Modal, DeleteConfirm, Field, PageHeader, SearchBar, StatCard, SectionCard } from "./admin/shared/ui";
 
 // ── NAV ────────────────────────────────────────────────────────────────────────
@@ -172,35 +171,168 @@ const PieTip = ({ active, payload }: any) => {
 
 // ── DASHBOARD OVERVIEW ─────────────────────────────────────────────────────────
 
-function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRangeTab: (t: string) => void }) {
-  const totalOrds     = orderStatus.reduce((s, o) => s + o.value, 0);
-  const completedOrds = orderStatus.find(o => o.name === "Delivered")?.value ?? 0;
-  const pendingOrds   = (orderStatus.find(o => o.name === "Processing")?.value ?? 0) +
-                        (orderStatus.find(o => o.name === "Shipped")?.value ?? 0);
-  const cancelledOrds = orderStatus.find(o => o.name === "Cancelled")?.value ?? 0;
-  const returnedOrds  = orderStatus.find(o => o.name === "Returned")?.value ?? 0;
-  const soldOutProds  = INIT_PRODUCTS.filter(p => p.status === "out_of_stock").length;
-  const lowStockProds = INIT_PRODUCTS.filter(p => p.status === "low_stock").length;
-  const calcPct       = (n: number) => ((n / totalOrds) * 100).toFixed(1);
+type DashboardStatus = "Delivered" | "Shipped" | "Processing" | "Cancelled" | "Returned";
+const DASHBOARD_STATUSES: ReadonlySet<string> = new Set([
+  "Delivered", "Shipped", "Processing", "Cancelled", "Returned",
+]);
+type DashboardOverviewData = {
+  today: { sales: number; salesChangePercent: number | null };
+  counts: {
+    users: number;
+    categories: number;
+    categoryGroups: number;
+    subcategories: number;
+    products: number;
+    brands: number;
+    soldOutProducts: number;
+    lowStockProducts: number;
+  };
+  orders: { total: number; completed: number; pending: number; cancelled: number; returned: number };
+  statusDistribution: Array<{ name: DashboardStatus; value: number; color: string }>;
+  hourlySales: Array<{ hour: string; sales: number }>;
+  salesByLocation: Array<{ city: string; sales: number }>;
+  revenueTrend: Array<{ day: string; revenue: number; orders: number }>;
+  topProducts: Array<{ name: string; cat: string; sold: number; revenue: number; stock: number }>;
+  recentOrders: Array<{
+    id: string;
+    customer: string;
+    av: string;
+    amount: number;
+    items: number;
+    status: DashboardStatus;
+    createdAt: string;
+  }>;
+  locationCount: number;
+};
 
-  const salesTodayData = [
-    { hour: "9am",  sales: 12.4 }, { hour: "10am", sales: 18.7 },
-    { hour: "11am", sales: 24.2 }, { hour: "12pm", sales: 31.8 },
-    { hour: "1pm",  sales: 28.3 }, { hour: "2pm",  sales: 35.6 },
-    { hour: "3pm",  sales: 22.1 }, { hour: "4pm",  sales: 19.8 },
-    { hour: "5pm",  sales: 26.4 }, { hour: "6pm",  sales: 38.9 },
-    { hour: "7pm",  sales: 42.1 }, { hour: "8pm",  sales: 29.7 },
-  ];
-  const salesByLocData = [
-    { city: "Mumbai",    sales: 28.4 }, { city: "Delhi",     sales: 24.7 },
-    { city: "Bengaluru", sales: 19.2 }, { city: "Hyderabad", sales: 14.8 },
-    { city: "Pune",      sales: 11.3 }, { city: "Kolkata",   sales: 8.9  },
-    { city: "Chennai",   sales: 9.7  }, { city: "Jaipur",    sales: 7.2  },
-  ];
-  const totalSalesToday = salesTodayData.reduce((s, d) => s + d.sales, 0).toFixed(1);
+function isDashboardOverview(value: unknown): value is DashboardOverviewData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  const isRecord = (item: unknown): item is Record<string, unknown> =>
+    Boolean(item && typeof item === "object" && !Array.isArray(item));
+  if (!isRecord(data.today) || !isRecord(data.counts) || !isRecord(data.orders)) return false;
+  const countKeys = ["users", "categories", "categoryGroups", "subcategories", "products", "brands", "soldOutProducts", "lowStockProducts"];
+  const orderKeys = ["total", "completed", "pending", "cancelled", "returned"];
+  return typeof data.today.sales === "number" &&
+    (data.today.salesChangePercent === null || typeof data.today.salesChangePercent === "number") &&
+    countKeys.every(key => typeof data.counts[key] === "number") &&
+    orderKeys.every(key => typeof data.orders[key] === "number") &&
+    Array.isArray(data.statusDistribution) && data.statusDistribution.every(item =>
+      isRecord(item) && typeof item.name === "string" && DASHBOARD_STATUSES.has(item.name) &&
+      typeof item.value === "number" && typeof item.color === "string"
+    ) &&
+    Array.isArray(data.hourlySales) && data.hourlySales.every(item =>
+      isRecord(item) && typeof item.hour === "string" && typeof item.sales === "number"
+    ) &&
+    Array.isArray(data.salesByLocation) && data.salesByLocation.every(item =>
+      isRecord(item) && typeof item.city === "string" && typeof item.sales === "number"
+    ) &&
+    Array.isArray(data.revenueTrend) && data.revenueTrend.every(item =>
+      isRecord(item) && typeof item.day === "string" && typeof item.revenue === "number" && typeof item.orders === "number"
+    ) &&
+    Array.isArray(data.topProducts) && data.topProducts.every(item =>
+      isRecord(item) && typeof item.name === "string" && typeof item.cat === "string" &&
+      typeof item.sold === "number" && typeof item.revenue === "number" && typeof item.stock === "number"
+    ) &&
+    Array.isArray(data.recentOrders) && data.recentOrders.every(item =>
+      isRecord(item) && typeof item.id === "string" && typeof item.customer === "string" &&
+      typeof item.av === "string" && typeof item.amount === "number" && typeof item.items === "number" &&
+      typeof item.status === "string" && DASHBOARD_STATUSES.has(item.status) &&
+      typeof item.createdAt === "string"
+    ) &&
+    typeof data.locationCount === "number";
+}
+
+function dashboardDateLabel() {
+  return new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date());
+}
+
+function dashboardTimeLabel(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })
+    : "—";
+}
+
+function DashboardOverview({ rangeTab, setRangeTab, refreshToken }: {
+  rangeTab: string;
+  setRangeTab: (t: string) => void;
+  refreshToken: number;
+}) {
+  const [data, setData] = useState<DashboardOverviewData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadOverview = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/dashboard/overview?range=${encodeURIComponent(rangeTab)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("overview" in result) || !isDashboardOverview(result.overview)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not load the dashboard overview.";
+        throw new Error(message);
+      }
+      setData(result.overview);
+      setError("");
+    } catch (loadError) {
+      if (!signal?.aborted) {
+        console.error("Failed to load admin dashboard overview:", loadError);
+        setError(loadError instanceof Error ? loadError.message : "Could not load the dashboard overview.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [rangeTab]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadOverview(controller.signal);
+    const interval = window.setInterval(() => void loadOverview(controller.signal), 5 * 60 * 1000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [loadOverview, refreshToken]);
+
+  const orderStatus = data?.statusDistribution ?? [];
+  const recentOrders = data?.recentOrders ?? [];
+  const topProducts = data?.topProducts ?? [];
+  const salesTodayData = data?.hourlySales ?? [];
+  const salesByLocData = data?.salesByLocation ?? [];
+  const revenueData = data?.revenueTrend ?? [];
+  const totalOrds = data?.orders.total ?? 0;
+  const completedOrds = data?.orders.completed ?? 0;
+  const pendingOrds = data?.orders.pending ?? 0;
+  const cancelledOrds = data?.orders.cancelled ?? 0;
+  const returnedOrds = data?.orders.returned ?? 0;
+  const soldOutProds = data?.counts.soldOutProducts ?? 0;
+  const lowStockProds = data?.counts.lowStockProducts ?? 0;
+  const totalSalesToday = ((data?.today.sales ?? 0) / 100000).toFixed(1);
+  const salesChange = data?.today.salesChangePercent;
+  const calcPct = (value: number) => totalOrds ? ((value / totalOrds) * 100).toFixed(1) : "0.0";
+  const rangeLabel = rangeTab === "Today" ? "Today" : `Last ${rangeTab === "7D" ? "7" : rangeTab === "30D" ? "30" : "90"} days`;
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{error}</span>
+          <button type="button" onClick={() => void loadOverview()} className="font-bold underline">Retry</button>
+        </div>
+      )}
 
       {/* ── DARK HERO BAND ── */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
@@ -224,7 +356,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               </div>
               <h1 className="text-2xl md:text-3xl font-black text-white leading-tight mb-1">Overview Dashboard</h1>
               <p className="text-[11px] font-medium" style={{ color: "rgba(255,255,255,0.32)" }}>
-                Saturday, 5 September 2026 &nbsp;·&nbsp; India Standard Time
+                {dashboardDateLabel()} &nbsp;·&nbsp; India Standard Time
               </p>
             </div>
 
@@ -232,10 +364,17 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
             <div className="flex items-stretch rounded-2xl overflow-hidden border shrink-0"
               style={{ borderColor: "rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.03)" }}>
               {[
-                { label: "Sales Today",  val: `₹${totalSalesToday}L`,                          badge: "▲ +18.4%",      ok: true  },
-                { label: "Total Orders", val: totalOrds.toLocaleString("en-IN"),                 badge: `${calcPct(completedOrds)}% done`, ok: true  },
-                { label: "Delivery Rate",val: `${calcPct(completedOrds)}%`,                      badge: `${completedOrds.toLocaleString("en-IN")} orders`, ok: true  },
-                { label: "Alerts",       val: String(soldOutProds + lowStockProds),              badge: "inventory",     ok: false },
+                {
+                  label: "Sales Today",
+                  val: data ? `₹${totalSalesToday}L` : "—",
+                  badge: salesChange === null || salesChange === undefined
+                    ? "vs yesterday n/a"
+                    : `${salesChange >= 0 ? "▲ +" : "▼ "}${Math.abs(salesChange).toFixed(1)}% vs yesterday`,
+                  ok: salesChange === null || salesChange === undefined || salesChange >= 0,
+                },
+                { label: "Total Orders", val: data ? totalOrds.toLocaleString("en-IN") : "—", badge: `${calcPct(completedOrds)}% done`, ok: true },
+                { label: "Delivery Rate", val: `${calcPct(completedOrds)}%`, badge: `${completedOrds.toLocaleString("en-IN")} orders`, ok: true },
+                { label: "Alerts", val: data ? String(soldOutProds + lowStockProds) : "—", badge: "inventory", ok: false },
               ].map((m, i) => (
                 <div key={i} className="px-4 py-3.5 md:px-5 text-right"
                   style={{ borderLeft: i > 0 ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
@@ -262,7 +401,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               ))}
             </div>
             <span className="text-[9px] font-medium" style={{ color: "rgba(255,255,255,0.18)" }}>
-              Auto-refresh · every 5 min
+              {loading ? "Updating…" : "Auto-refresh · every 5 min"}
             </span>
           </div>
         </div>
@@ -271,10 +410,10 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
       {/* ── BUSINESS METRICS — 4 colorful gradient cards ── */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {[
-          { label: "Total Users",         val: "51,29,847",                                     sub: "+2,140 today",                       Icon: Users,     grad: "linear-gradient(140deg,#6366f1,#4338ca)" },
-          { label: "Total Categories",    val: INIT_CATS.length.toString(),                     sub: `${INIT_GROUPS.length} category groups`, Icon: Layers,    grad: "linear-gradient(140deg,#009966,#006644)" },
-          { label: "Total Subcategories", val: INIT_SUBCATS.length.toString(),                  sub: `${INIT_CATS.length} parent cats`,     Icon: GitBranch, grad: "linear-gradient(140deg,#0d9488,#0f766e)" },
-          { label: "Total Products",      val: INIT_PRODUCTS.length.toLocaleString("en-IN"),    sub: `${INIT_BRANDS.length} brands listed`, Icon: Package,   grad: "linear-gradient(140deg,#3b82f6,#1d4ed8)" },
+          { label: "Total Users",         val: data ? data.counts.users.toLocaleString("en-IN") : "—",         sub: "Registered customer accounts", Icon: Users,     grad: "linear-gradient(140deg,#6366f1,#4338ca)" },
+          { label: "Total Categories",    val: data ? data.counts.categories.toLocaleString("en-IN") : "—",    sub: `${data?.counts.categoryGroups ?? "—"} category groups`, Icon: Layers,    grad: "linear-gradient(140deg,#009966,#006644)" },
+          { label: "Total Subcategories", val: data ? data.counts.subcategories.toLocaleString("en-IN") : "—", sub: `${data?.counts.categories ?? "—"} parent cats`, Icon: GitBranch, grad: "linear-gradient(140deg,#0d9488,#0f766e)" },
+          { label: "Total Products",      val: data ? data.counts.products.toLocaleString("en-IN") : "—",      sub: `${data?.counts.brands ?? "—"} brands listed`, Icon: Package,   grad: "linear-gradient(140deg,#3b82f6,#1d4ed8)" },
         ].map((k, i) => {
           const Icon = k.Icon;
           return (
@@ -308,11 +447,11 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
         <p className="text-[9px] font-black text-gray-400 uppercase tracking-[0.22em] mb-2.5 px-0.5">Order Breakdown</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
           {[
-            { label: "Total Orders",    val: totalOrds,     sub: "All time",          Icon: ShoppingCart, color: "#8b5cf6", barPct: 100,                             isAlert: false },
-            { label: "Completed",       val: completedOrds, sub: `${calcPct(completedOrds)}% rate`, Icon: CheckCircle2, color: G,        barPct: parseFloat(calcPct(completedOrds)), isAlert: false },
-            { label: "Pending",         val: pendingOrds,   sub: "Ship + Processing", Icon: Clock,        color: "#f59e0b", barPct: parseFloat(calcPct(pendingOrds)),   isAlert: false },
-            { label: "Cancelled",       val: cancelledOrds, sub: `${calcPct(cancelledOrds)}% rate`, Icon: XCircle,      color: "#ef4444", barPct: parseFloat(calcPct(cancelledOrds)), isAlert: true  },
-            { label: "Returned",        val: returnedOrds,  sub: "Refund pending",    Icon: RefreshCw,    color: "#ec4899", barPct: parseFloat(calcPct(returnedOrds)),  isAlert: true  },
+            { label: "Total Orders", val: totalOrds, sub: "All time", Icon: ShoppingCart, color: "#8b5cf6", barPct: 100, isAlert: false },
+            { label: "Completed", val: completedOrds, sub: `${calcPct(completedOrds)}% rate`, Icon: CheckCircle2, color: G, barPct: parseFloat(calcPct(completedOrds)), isAlert: false },
+            { label: "Pending", val: pendingOrds, sub: "Ship + Processing", Icon: Clock, color: "#f59e0b", barPct: parseFloat(calcPct(pendingOrds)), isAlert: false },
+            { label: "Cancelled", val: cancelledOrds, sub: `${calcPct(cancelledOrds)}% rate`, Icon: XCircle, color: "#ef4444", barPct: parseFloat(calcPct(cancelledOrds)), isAlert: true },
+            { label: "Returned", val: returnedOrds, sub: "Refund pending", Icon: RefreshCw, color: "#ec4899", barPct: parseFloat(calcPct(returnedOrds)), isAlert: true },
           ].map((k, i) => {
             const Icon = k.Icon;
             return (
@@ -350,7 +489,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
       {/* ── INVENTORY ALERT CARDS ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {[
-          { label: "Product Sold Out",     val: soldOutProds,  sub: `${soldOutProds} product${soldOutProds !== 1 ? "s" : ""} require immediate restocking`,        Icon: AlertTriangle, color: "#ef4444", bg: "linear-gradient(135deg,#fef2f2,#fee2e2)", border: "#fca5a5" },
+          { label: "Product Sold Out", val: soldOutProds, sub: `${soldOutProds} product${soldOutProds !== 1 ? "s" : ""} require immediate restocking`, Icon: AlertTriangle, color: "#ef4444", bg: "linear-gradient(135deg,#fef2f2,#fee2e2)", border: "#fca5a5" },
           { label: "Product Low on Stock", val: lowStockProds, sub: `${lowStockProds} product${lowStockProds !== 1 ? "s" : ""} below minimum inventory threshold`, Icon: AlertTriangle, color: "#f97316", bg: "linear-gradient(135deg,#fff7ed,#ffedd5)", border: "#fdba74" },
         ].map((k, i) => {
           const Icon = k.Icon;
@@ -387,8 +526,14 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               <p className="text-sm font-black text-gray-900">Total Sales Today</p>
               <p className="text-xs text-gray-400 mt-0.5">Hourly · ₹{totalSalesToday}L cumulative</p>
             </div>
-            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold" style={{ background: `${G}12`, color: G }}>
-              <TrendingUp size={11}/> +18.4% vs yesterday
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold"
+              style={{ background: `${salesChange !== null && salesChange !== undefined && salesChange < 0 ? "#ef4444" : G}12`, color: salesChange !== null && salesChange !== undefined && salesChange < 0 ? "#ef4444" : G }}>
+              {salesChange !== null && salesChange !== undefined && salesChange < 0
+                ? <TrendingDown size={11} />
+                : <TrendingUp size={11} />}
+              {salesChange === null || salesChange === undefined
+                ? "No comparison available"
+                : `${salesChange >= 0 ? "+" : ""}${salesChange.toFixed(1)}% vs yesterday`}
             </span>
           </div>
           <ResponsiveContainer width="100%" height={200}>
@@ -407,7 +552,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
                 return (
                   <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs shadow-xl">
                     <p className="text-gray-400 font-semibold mb-0.5">{label}</p>
-                    <p className="font-black" style={{ color: G }}>₹{payload[0].value}L</p>
+                    <p className="font-black" style={{ color: G }}>₹{Number(payload[0].value).toFixed(2)}L</p>
                   </div>
                 );
               }}/>
@@ -423,20 +568,20 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               <p className="text-xs text-gray-400 mt-0.5">Top 8 cities · ₹ Lakhs</p>
             </div>
             <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold" style={{ background: "#6366f115", color: "#6366f1" }}>
-              <MapPin size={10}/> 8 cities
+              <MapPin size={10}/> {data?.locationCount ?? 0} cities
             </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={salesByLocData} layout="vertical" margin={{ top: 0, right: 6, left: 0, bottom: 0 }} barCategoryGap="18%">
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false}/>
-              <XAxis type="number" tick={{ fill: "#9ca3af", fontSize: 8 }} axisLine={false} tickLine={false} domain={[0, 35]}/>
+              <XAxis type="number" tick={{ fill: "#9ca3af", fontSize: 8 }} axisLine={false} tickLine={false} domain={[0, "dataMax"]}/>
               <YAxis type="category" dataKey="city" tick={{ fill: "#6b7280", fontSize: 9 }} axisLine={false} tickLine={false} width={64}/>
               <Tooltip content={({ active, payload, label }: any) => {
                 if (!active || !payload?.length) return null;
                 return (
                   <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs shadow-xl">
                     <p className="font-black text-gray-800 mb-0.5">{label}</p>
-                    <p style={{ color: G }}>₹{payload[0].value}L</p>
+                    <p style={{ color: G }}>₹{Number(payload[0].value).toFixed(2)}L</p>
                   </div>
                 );
               }}/>
@@ -450,7 +595,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className={`${card} p-4 md:p-5 xl:col-span-2`}>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div><p className="text-sm font-black text-gray-900">Revenue & Orders</p><p className="text-xs text-gray-400 mt-0.5">Last 7 days</p></div>
+            <div><p className="text-sm font-black text-gray-900">Revenue & Orders</p><p className="text-xs text-gray-400 mt-0.5">{rangeLabel}</p></div>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 text-xs text-gray-400"><span className="w-3 h-1.5 rounded-sm inline-block" style={{background:G}}/> Revenue</span>
               <span className="flex items-center gap-1.5 text-xs text-gray-400"><span className="w-3 h-1.5 bg-blue-400 rounded-sm inline-block"/> Orders</span>
@@ -482,7 +627,7 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               <div key={i} className="flex items-center justify-between">
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full shrink-0" style={{background:s.color}}/><span className="text-[11px] text-gray-500">{s.name}</span></div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] text-gray-400 font-medium">{((s.value/totalOrds)*100).toFixed(0)}%</span>
+                  <span className="text-[9px] text-gray-400 font-medium">{(totalOrds ? (s.value/totalOrds)*100 : 0).toFixed(0)}%</span>
                   <span className="text-[11px] font-black text-gray-800">{s.value.toLocaleString("en-IN")}</span>
                 </div>
               </div>
@@ -500,19 +645,19 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
               style={{ color: G, background: `${G}10` }}>View All</button>
           </div>
           <div className="space-y-3">
-            {topProducts.map((p,i)=>(
+            {topProducts.length ? topProducts.map((p,i)=>(
               <div key={i} className="flex items-center gap-3 group/row">
                 <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black border border-gray-100 bg-gray-50 text-gray-400 shrink-0 group-hover/row:bg-white transition-colors">{i+1}</div>
                 <div className="flex-1 min-w-0"><p className="text-xs font-bold text-gray-800 truncate">{p.name}</p><p className="text-[10px] text-gray-400">{p.cat} · {p.stock} in stock</p></div>
                 <div className="text-right shrink-0"><p className="text-xs font-black text-gray-800">{p.sold} sold</p><p className="text-[10px] font-bold" style={{color:G}}>{fmt(p.revenue)}</p></div>
               </div>
-            ))}
+            )) : <p className="py-6 text-center text-xs text-gray-400">No product sales today</p>}
           </div>
         </div>
 
         <div className={`${card} p-4 md:p-5 xl:col-span-2`}>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-            <div><p className="text-sm font-black text-gray-900">Recent Orders</p><p className="text-xs text-gray-400 mt-0.5">Today, 5 Sep 2026</p></div>
+            <div><p className="text-sm font-black text-gray-900">Recent Orders</p><p className="text-xs text-gray-400 mt-0.5">{dashboardDateLabel()}</p></div>
             <button className="text-[10px] font-bold flex items-center gap-1 px-2.5 py-1.5 rounded-lg"
               style={{ color: G, background: `${G}10` }}>
               View all <ChevronRight size={11}/>
@@ -535,10 +680,11 @@ function DashboardOverview({ rangeTab, setRangeTab }: { rangeTab: string; setRan
                       <td className="py-3 pr-3"><span className="text-xs font-black text-gray-900 whitespace-nowrap">{fmt(o.amount)}</span></td>
                       <td className="py-3 pr-3"><span className="text-xs text-gray-400">{o.items}</span></td>
                       <td className="py-3 pr-3"><span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap" style={{color:s.color,background:s.bg}}>{s.icon} {o.status}</span></td>
-                      <td className="py-3"><span className="text-[10px] text-gray-400 whitespace-nowrap">{o.time}</span></td>
+                      <td className="py-3"><span className="text-[10px] text-gray-400 whitespace-nowrap">{dashboardTimeLabel(o.createdAt)}</span></td>
                     </tr>
                   );
                 })}
+                {!recentOrders.length && <tr><td colSpan={6} className="py-8 text-center text-xs text-gray-400">No orders yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -684,6 +830,7 @@ export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) =
   const [refreshing,        setRefreshing       ] = useState(false);
   const [refreshDone,       setRefreshDone      ] = useState(false);
   const [rangeTab,          setRangeTab         ] = useState("7D");
+  const [dashboardRefreshToken, setDashboardRefreshToken] = useState(0);
   const [notifItems, setNotifItems] = useState([
     { id:0, msg:"1,847 orders pending dispatch",    time:"Just now",  urgent:true,  read:false, icon:"cart"   },
     { id:1, msg:"12 products are out of stock",     time:"8 min ago", urgent:true,  read:false, icon:"box"    },
@@ -710,6 +857,7 @@ export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) =
   const handleRefresh = () => {
     if (refreshing) return;
     setRefreshing(true);
+    setDashboardRefreshToken(value => value + 1);
     setTimeout(() => { setRefreshing(false); setRefreshDone(true); }, 1200);
     setTimeout(() => setRefreshDone(false), 2400);
   };
@@ -771,7 +919,7 @@ export function AdminDashboard({ setPage, currentAdmin }: { setPage: (p: Page) =
       case "notifications":   return <NotificationPage />;
       case "faqs":            return <FAQPage />;
       case "settings":        return <SettingsPage />;
-      default:                return <DashboardOverview rangeTab={rangeTab} setRangeTab={setRangeTab} />;
+      default:                return <DashboardOverview rangeTab={rangeTab} setRangeTab={setRangeTab} refreshToken={dashboardRefreshToken} />;
     }
   }
 

@@ -122,7 +122,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
             IN ('delivered', 'completed')
           AND target.delivered_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
         ON CONFLICT (order_id) DO NOTHING
-        RETURNING order_id, status, requested_at
+        RETURNING id, order_id, status, requested_at
+      ),
+      return_event AS (
+        INSERT INTO customer_order_return_status_history (return_id, status, changed_at)
+        SELECT inserted.id, inserted.status, inserted.requested_at
+        FROM inserted
+        RETURNING return_id
       )
       SELECT
         target.order_number,
@@ -130,7 +136,9 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         target.delivered_at,
         COALESCE(inserted.status, existing.status) AS return_status,
         COALESCE(inserted.requested_at, existing.requested_at) AS requested_at,
-        inserted.order_id IS NOT NULL AS created
+        inserted.id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM return_event WHERE return_event.return_id = inserted.id
+        ) AS created
       FROM target
       LEFT JOIN inserted ON inserted.order_id = target.id
       LEFT JOIN customer_order_returns existing ON existing.order_id = target.id

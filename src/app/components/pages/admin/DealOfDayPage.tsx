@@ -1,281 +1,365 @@
-import { useState, useEffect } from "react";
-import { motion } from "motion/react";
-import { Gift, GripVertical, Bell, Home, Search, Plus } from "lucide-react";
-import { Toggle, Modal, Field, PageHeader, StatCard, SectionCard } from "./shared/ui";
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, Gift, Home, Pencil, Search, Star, Trash2 } from "lucide-react";
+import { Field, Modal, PageHeader, StatCard, Toggle } from "./shared/ui";
 import { G, inp, card } from "./shared/constants";
 
 type Deal = {
   id: number;
-  product: string;
-  dealPrice: number;
+  productId: number;
+  productName: string;
+  brand: string;
+  category: string;
+  imageUrl: string;
   originalPrice: number;
+  dealPrice: number;
+  discountPercent: number;
+  stock: number;
   dealDate: string;
-  maxUnits: number;
-  soldUnits: number;
-  showOnHomepage: boolean;
-  pushNotification: boolean;
   active: boolean;
+  featured: boolean;
+  showOnHomepage: boolean;
 };
 
-const CURRENT_DEAL: Deal = {
-  id: 0,
-  product: "iPhone 15 Pro Max",
-  dealPrice: 134900,
-  originalPrice: 159900,
-  dealDate: "2026-10-05",
-  maxUnits: 50,
-  soldUnits: 38,
-  showOnHomepage: true,
-  pushNotification: true,
-  active: true,
+type Product = {
+  id: number;
+  name: string;
+  brand: string;
+  category: string;
+  price: number;
+  stock: number;
+  imageUrl: string;
+  selectable: boolean;
 };
 
-const UPCOMING_DEALS = [
-  { date: "Oct 06", product: "Samsung Galaxy S24 Ultra", price: 124999, discount: 10 },
-  { date: "Oct 07", product: "Sony WH-1000XM5 Headphones", price: 24999, discount: 20 },
-  { date: "Oct 08", product: 'LG 55" OLED Smart TV', price: 89999, discount: 15 },
-  { date: "Oct 09", product: "Apple Watch Series 9", price: 44999, discount: 12 },
-  { date: "Oct 10", product: "Dyson V15 Detect Vacuum", price: 49999, discount: 18 },
-  { date: "Oct 11", product: "Bose QuietComfort 45", price: 19999, discount: 22 },
-  { date: "Oct 12", product: "Instant Pot Duo 7-in-1", price: 8499, discount: 25 },
-];
+type DealForm = {
+  id?: number;
+  productId: number;
+  discountPercent: number;
+  dealDate: string;
+  active: boolean;
+  featured: boolean;
+  showOnHomepage: boolean;
+};
 
-const HISTORY: Array<{ date: string; product: string; units: number; revenue: number }> = [
-  { date: "Oct 04", product: "MacBook Air M3",         units: 18, revenue: 179820 },
-  { date: "Oct 03", product: "OnePlus 12 5G",          units: 42, revenue: 125958 },
-  { date: "Oct 02", product: "Puma Running Shoes",     units: 78, revenue: 156078 },
-  { date: "Oct 01", product: "Philips Air Fryer XXL",  units: 55, revenue: 109945 },
-  { date: "Sep 30", product: "Kindle Paperwhite 5",    units: 63, revenue: 126063 },
-  { date: "Sep 29", product: "Noise ColorFit Pro 4",   units: 90, revenue: 89910  },
-  { date: "Sep 28", product: "boAt Rockerz 550",       units: 110, revenue: 219780 },
-  { date: "Sep 27", product: "Himalaya Face Wash Kit", units: 201, revenue: 100299 },
-  { date: "Sep 26", product: "Levi's Jeans 3-Pack",    units: 67, revenue: 133933 },
-  { date: "Sep 25", product: "Prestige Induction Set", units: 38, revenue: 75962  },
-];
-
-function Countdown() {
-  const [time, setTime] = useState({ h: 0, m: 0, s: 0 });
-  useEffect(() => {
-    const calc = () => {
-      const now = new Date();
-      const midnight = new Date(now); midnight.setHours(24, 0, 0, 0);
-      const diff = midnight.getTime() - now.getTime();
-      setTime({
-        h: Math.floor(diff / 3600000),
-        m: Math.floor((diff % 3600000) / 60000),
-        s: Math.floor((diff % 60000) / 1000),
-      });
-    };
-    calc();
-    const id = setInterval(calc, 1000);
-    return () => clearInterval(id);
-  }, []);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    <div className="flex items-center gap-1.5">
-      {[time.h, time.m, time.s].map((v, i) => (
-        <span key={i} className="flex items-center gap-1">
-          <span className="text-2xl font-black tabular-nums" style={{ color: "#ef4444" }}>{pad(v)}</span>
-          {i < 2 && <span className="text-xl font-black text-red-400">:</span>}
-        </span>
-      ))}
-    </div>
-  );
+function isDeal(value: unknown): value is Deal {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const deal = value as Record<string, unknown>;
+  return typeof deal.id === "number" && typeof deal.productId === "number" &&
+    typeof deal.productName === "string" && typeof deal.brand === "string" &&
+    typeof deal.category === "string" && typeof deal.imageUrl === "string" &&
+    typeof deal.originalPrice === "number" && typeof deal.dealPrice === "number" &&
+    typeof deal.discountPercent === "number" && typeof deal.stock === "number" &&
+    typeof deal.dealDate === "string" && typeof deal.active === "boolean" &&
+    typeof deal.featured === "boolean" && typeof deal.showOnHomepage === "boolean";
 }
 
-const BLANK_FORM = {
-  product: "", dealPrice: 0, originalPrice: 0,
-  dealDate: "", maxUnits: 50,
-  showOnHomepage: true, pushNotification: false,
-};
+function isProduct(value: unknown): value is Product {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const product = value as Record<string, unknown>;
+  return typeof product.id === "number" && typeof product.name === "string" &&
+    typeof product.brand === "string" && typeof product.category === "string" &&
+    typeof product.price === "number" && typeof product.stock === "number" &&
+    typeof product.imageUrl === "string" && typeof product.selectable === "boolean";
+}
+
+function indiaDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function money(value: number) {
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+const emptyForm = (): DealForm => ({
+  productId: 0,
+  discountPercent: 10,
+  dealDate: indiaDate(),
+  active: true,
+  featured: false,
+  showOnHomepage: true,
+});
 
 export function DealOfDayPage() {
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [error, setError] = useState("");
   const [modal, setModal] = useState(false);
-  const [form, setForm]   = useState(BLANK_FORM);
+  const [form, setForm] = useState<DealForm>(emptyForm);
   const [query, setQuery] = useState("");
-  const set = (k: keyof typeof form, v: any) => setForm(p => ({ ...p, [k]: v }));
 
-  const disc = CURRENT_DEAL.originalPrice > 0
-    ? Math.round((1 - CURRENT_DEAL.dealPrice / CURRENT_DEAL.originalPrice) * 100)
-    : 0;
-  const stockPct = Math.round((CURRENT_DEAL.soldUnits / CURRENT_DEAL.maxUnits) * 100);
-  const remaining = CURRENT_DEAL.maxUnits - CURRENT_DEAL.soldUnits;
+  const loadData = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/admin/deal-of-day", {
+        cache: "no-store",
+        signal,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true ||
+          !("deals" in result) || !Array.isArray(result.deals) ||
+          !result.deals.every(isDeal) ||
+          !("products" in result) || !Array.isArray(result.products) ||
+          !result.products.every(isProduct)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to load Deal of the Day.";
+        throw new Error(message);
+      }
+      setDeals(result.deals);
+      setProducts(result.products);
+      setError("");
+    } catch (loadError) {
+      if (!signal?.aborted) {
+        console.error("Failed to load admin Deal of the Day:", loadError);
+        setError(loadError instanceof Error ? loadError.message : "Failed to load Deal of the Day.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadData(controller.signal);
+    return () => controller.abort();
+  }, [loadData]);
+
+  const today = indiaDate();
+  const todayDeals = useMemo(() => deals.filter(deal => deal.dealDate === today), [deals, today]);
+  const activeToday = todayDeals.filter(deal => deal.active).length;
+  const featuredToday = todayDeals.filter(deal => deal.featured).length;
+  const upcoming = deals.filter(deal => deal.dealDate > today).length;
+  const filteredProducts = products.filter(product =>
+    product.selectable && `${product.name} ${product.brand} ${product.category}`.toLowerCase().includes(query.toLowerCase())
+  );
+  const selectedProduct = products.find(product => product.id === form.productId);
+
+  function startCreate() {
+    setForm(emptyForm());
+    setQuery("");
+    setError("");
+    setModal(true);
+  }
+
+  function startEdit(deal: Deal) {
+    setForm({
+      id: deal.id,
+      productId: deal.productId,
+      discountPercent: deal.discountPercent,
+      dealDate: deal.dealDate,
+      active: deal.active,
+      featured: deal.featured,
+      showOnHomepage: deal.showOnHomepage,
+    });
+    setQuery(deal.productName);
+    setError("");
+    setModal(true);
+  }
+
+  async function saveDeal() {
+    if (!form.productId || !form.dealDate || form.discountPercent <= 0 || form.discountPercent >= 100) {
+      setError("Choose a product, valid date, and discount between 1% and 99%.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/deal-of-day", {
+        method: form.id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to save this deal.";
+        throw new Error(message);
+      }
+      setModal(false);
+      await loadData();
+    } catch (saveError) {
+      console.error("Failed to save Deal of the Day:", saveError);
+      setError(saveError instanceof Error ? saveError.message : "Failed to save this deal.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteDeal(deal: Deal) {
+    if (!window.confirm(`Delete the deal for "${deal.productName}" on ${deal.dealDate}?`)) return;
+    setDeletingId(deal.id);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/deal-of-day?id=${deal.id}`, { method: "DELETE" });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" ||
+          !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Failed to delete this deal.";
+        throw new Error(message);
+      }
+      await loadData();
+    } catch (deleteError) {
+      console.error("Failed to delete Deal of the Day:", deleteError);
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete this deal.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function set<K extends keyof DealForm>(key: K, value: DealForm[K]) {
+    setForm(previous => ({ ...previous, [key]: value }));
+  }
 
   return (
     <div className="space-y-5">
       <PageHeader breadcrumb="Operations / Deal of the Day" title="Deal of the Day"
-        subtitle="Set and manage today's featured deal"
-        onAdd={() => setModal(true)} addLabel="Set New Deal" />
+        subtitle="Schedule product discounts and choose the featured homepage deal"
+        count={deals.length} onAdd={startCreate} addLabel="Set New Deal" />
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Today's Discount"   val={`${disc}%`}                    color={G}       icon={Gift}   />
-        <StatCard label="Units Sold Today"   val={CURRENT_DEAL.soldUnits}        color="#3b82f6" icon={Gift}   />
-        <StatCard label="Remaining Units"    val={remaining}                     color="#f59e0b" icon={Gift}   />
-        <StatCard label="Today's Revenue"    val={`₹${(CURRENT_DEAL.soldUnits * CURRENT_DEAL.dealPrice / 100000).toFixed(1)}L`} color="#8b5cf6" icon={Gift} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Deals Today" val={todayDeals.length} color={G} icon={Gift} />
+        <StatCard label="Active Today" val={activeToday} color="#3b82f6" icon={Gift} />
+        <StatCard label="Featured Today" val={featuredToday} color="#f59e0b" icon={Star} />
+        <StatCard label="Upcoming Deals" val={upcoming} color="#8b5cf6" icon={CalendarDays} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        {/* Current deal — prominent card */}
-        <div className="xl:col-span-2 space-y-5">
-          <div className={`${card} overflow-hidden`}>
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2" style={{ background: "#fafafa" }}>
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: G }} />
-              <span className="text-xs font-black text-gray-600 uppercase tracking-wider">Today's Deal — Live Now</span>
-            </div>
-            <div className="p-6">
-              <div className="flex items-start gap-5 flex-wrap">
-                {/* Product image placeholder */}
-                <div className="w-28 h-28 rounded-2xl flex items-center justify-center shrink-0 text-4xl"
-                  style={{ background: `${G}10` }}>
-                  📱
+      {error && !modal && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      )}
+      {loading ? (
+        <div className={`${card} p-8 text-center text-sm text-gray-500`}>Loading Deal of the Day campaigns…</div>
+      ) : deals.length === 0 ? (
+        <div className={`${card} p-10 text-center`}>
+          <Gift className="mx-auto mb-3 text-gray-300" size={32} />
+          <p className="font-bold text-gray-700">No daily deals scheduled</p>
+          <p className="mt-1 text-sm text-gray-400">Create a deal to show special product pricing in your store.</p>
+        </div>
+      ) : (
+        <div className={`${card} overflow-hidden`}>
+          <div className="border-b border-gray-100 px-5 py-4">
+            <h2 className="text-sm font-black text-gray-800">Scheduled and past deals</h2>
+            <p className="mt-1 text-xs text-gray-400">Only active deals for today are included in store pricing.</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {deals.map(deal => (
+              <article key={deal.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-gray-50">
+                  {deal.imageUrl ? <img src={deal.imageUrl} alt="" className="h-full w-full object-contain" /> : null}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-xl font-black text-gray-900 mb-1">{CURRENT_DEAL.product}</h2>
-                  <div className="flex items-baseline gap-3 mb-2">
-                    <span className="text-2xl font-black" style={{ color: G }}>
-                      ₹{CURRENT_DEAL.dealPrice.toLocaleString("en-IN")}
-                    </span>
-                    <span className="text-base text-gray-400 line-through">
-                      ₹{CURRENT_DEAL.originalPrice.toLocaleString("en-IN")}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-lg text-xs font-black text-white" style={{ background: "#ef4444" }}>
-                      {disc}% OFF
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-sm font-bold text-gray-900">{deal.productName}</h3>
+                    {deal.featured && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Featured</span>}
+                    {deal.showOnHomepage && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Homepage</span>}
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${deal.active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                      {deal.active ? "Active" : "Inactive"}
                     </span>
                   </div>
-
-                  {/* Countdown */}
-                  <div className="mb-3">
-                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Deal Ends In</p>
-                    <Countdown />
+                  <p className="mt-1 text-xs text-gray-400">{deal.brand || deal.category} · {deal.dealDate}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-black text-emerald-700">{money(deal.dealPrice)}</span>
+                    <span className="text-gray-400 line-through">{money(deal.originalPrice)}</span>
+                    <span className="font-bold text-rose-600">{deal.discountPercent}% off</span>
+                    <span className="text-gray-400">{deal.stock} in stock</span>
                   </div>
-
-                  {/* Stock progress */}
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-gray-500">Stock</span>
-                      <span className="text-xs font-black text-gray-700">
-                        {remaining} / {CURRENT_DEAL.maxUnits} remaining
-                      </span>
-                    </div>
-                    <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden">
-                      <motion.div className="h-full rounded-full"
-                        initial={{ width: 0 }} animate={{ width: `${stockPct}%` }}
-                        transition={{ duration: 0.8, ease: "easeOut" }}
-                        style={{ background: stockPct > 80 ? "#ef4444" : G }} />
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-1">{stockPct}% sold</p>
-                  </div>
-
-                  <button onClick={() => setModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all"
-                    style={{ background: G }}>
-                    <Plus size={14} /> Change Deal
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => startEdit(deal)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50">
+                    <Pencil size={13} /> Edit
+                  </button>
+                  <button type="button" disabled={deletingId === deal.id} onClick={() => void deleteDeal(deal)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-100 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">
+                    <Trash2 size={13} /> {deletingId === deal.id ? "Deleting…" : "Delete"}
                   </button>
                 </div>
-              </div>
-            </div>
+              </article>
+            ))}
           </div>
-
-          {/* Schedule queue */}
-          <SectionCard title="Upcoming Deal Queue — Next 7 Days">
-            <div className="space-y-2">
-              {UPCOMING_DEALS.map((d, i) => (
-                <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 hover:border-gray-200 hover:bg-gray-50/50 transition-all">
-                  <GripVertical size={14} className="text-gray-300 shrink-0" />
-                  <div className="w-12 text-center shrink-0">
-                    <span className="text-[10px] font-black text-gray-400 uppercase">{d.date}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-gray-800 truncate">{d.product}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-black text-gray-900">₹{d.price.toLocaleString("en-IN")}</p>
-                    <p className="text-[10px] font-bold" style={{ color: G }}>{d.discount}% off</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
         </div>
+      )}
 
-        {/* History table */}
-        <div>
-          <SectionCard title="Last 10 Deals History">
-            <div className="space-y-3">
-              {HISTORY.map((h, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className="text-gray-400 w-12 shrink-0">{h.date}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-700 truncate">{h.product}</p>
-                    <p className="text-[10px] text-gray-400">{h.units} units</p>
-                  </div>
-                  <span className="font-black shrink-0" style={{ color: G }}>
-                    ₹{(h.revenue / 100000).toFixed(1)}L
-                  </span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-
-      {/* Set New Deal Modal */}
-      <Modal open={modal} onClose={() => setModal(false)} title="Set New Deal of the Day" wide>
-        <div className="space-y-3">
-          <Field label="Select Product" required>
+      <Modal open={modal} onClose={() => !saving && setModal(false)}
+        title={form.id ? "Edit Deal of the Day" : "Set Deal of the Day"} wide>
+        <div className="space-y-4">
+          {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+          <Field label="Find a product" required>
             <div className="relative">
-              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              <input value={query} onChange={e => { setQuery(e.target.value); set("product", e.target.value); }}
-                placeholder="Search products…" className={`${inp} pl-8`} />
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={query} onChange={event => setQuery(event.target.value)}
+                placeholder="Search active products by name, brand, or category" className={`${inp} pl-9`} />
             </div>
-            {query && (
-              <div className="border border-gray-200 rounded-xl mt-1 overflow-hidden shadow-sm">
-                {["iPhone 15 Pro Max", "Samsung Galaxy S24 Ultra", "Sony WH-1000XM5"]
-                  .filter(p => p.toLowerCase().includes(query.toLowerCase()))
-                  .map(p => (
-                    <button key={p} onClick={() => { set("product", p); setQuery(p); }}
-                      className="w-full text-left px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
-                      {p}
-                    </button>
-                  ))}
-              </div>
-            )}
+            <select value={form.productId || ""} onChange={event => {
+              const productId = Number(event.target.value);
+              set("productId", productId);
+              const product = products.find(item => item.id === productId);
+              if (product) setQuery(product.name);
+            }} className={`${inp} mt-2`} required>
+              <option value="">Select a product</option>
+              {filteredProducts.map(product => (
+                <option key={product.id} value={product.id}>
+                  {product.name} {product.brand ? `— ${product.brand}` : ""} · {money(product.price)}
+                </option>
+              ))}
+              {form.productId && !filteredProducts.some(product => product.id === form.productId) &&
+                products.filter(product => product.id === form.productId).map(product => (
+                  <option key={product.id} value={product.id} disabled>{product.name} (not selectable)</option>
+                ))}
+            </select>
+            {selectedProduct && <p className="mt-1 text-[10px] text-gray-400">
+              Current price: {money(selectedProduct.price)} · Stock: {selectedProduct.stock}
+            </p>}
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Deal Price (₹)" required>
-              <input type="number" value={form.dealPrice} onChange={e => set("dealPrice", +e.target.value)} min={0} className={inp} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Discount percent" required hint="Between 1 and 99">
+              <input type="number" min="1" max="99" step="0.01" value={form.discountPercent}
+                onChange={event => set("discountPercent", Number(event.target.value))} className={inp} />
             </Field>
-            <Field label="Original Price (₹)" hint="auto-fills from product">
-              <input type="number" value={form.originalPrice} onChange={e => set("originalPrice", +e.target.value)} min={0} className={inp} />
-            </Field>
-            <Field label="Deal Date" required>
-              <input type="date" value={form.dealDate} onChange={e => set("dealDate", e.target.value)} className={inp} />
-            </Field>
-            <Field label="Max Units">
-              <input type="number" value={form.maxUnits} onChange={e => set("maxUnits", +e.target.value)} min={1} className={inp} />
+            <Field label="Deal date" required>
+              <input type="date" value={form.dealDate} onChange={event => set("dealDate", event.target.value)}
+                className={inp} />
             </Field>
           </div>
-          <div className="space-y-3 pt-1">
-            <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50">
-              <div className="flex items-center gap-2">
-                <Home size={14} className="text-gray-400" />
-                <span className="text-sm text-gray-700">Show on Homepage</span>
+          {selectedProduct && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Deal price preview: <strong>{money(selectedProduct.price * (1 - form.discountPercent / 100))}</strong>
+            </p>
+          )}
+          <div className="space-y-2">
+            {[
+              { key: "featured" as const, label: "Featured main product", icon: Star },
+              { key: "showOnHomepage" as const, label: "Show in homepage Deal of the Day", icon: Home },
+              { key: "active" as const, label: "Deal active for the scheduled date", icon: Gift },
+            ].map(({ key, label, icon: Icon }) => (
+              <div key={key} className="flex items-center justify-between rounded-xl bg-gray-50 p-3">
+                <span className="flex items-center gap-2 text-sm text-gray-700"><Icon size={14} className="text-gray-400" />{label}</span>
+                <Toggle checked={form[key] as boolean} onChange={() => set(key, !form[key])} />
               </div>
-              <Toggle checked={form.showOnHomepage} onChange={() => set("showOnHomepage", !form.showOnHomepage)} />
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-xl bg-gray-50">
-              <div className="flex items-center gap-2">
-                <Bell size={14} className="text-gray-400" />
-                <span className="text-sm text-gray-700">Push Notification</span>
-              </div>
-              <Toggle checked={form.pushNotification} onChange={() => set("pushNotification", !form.pushNotification)} />
-            </div>
+            ))}
           </div>
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button onClick={() => setModal(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-gray-500 border border-gray-200 hover:bg-gray-50 transition-all">Cancel</button>
-            <button onClick={() => setModal(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all" style={{ background: G }}>
-              Set as Deal of the Day
+          {form.featured && <p className="text-[11px] text-gray-400">Setting this as featured replaces the featured product for this date.</p>}
+          <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+            <button type="button" disabled={saving} onClick={() => setModal(false)}
+              className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="button" disabled={saving || !form.productId}
+              onClick={() => void saveDeal()}
+              className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              style={{ background: G }}>
+              {saving ? "Saving…" : form.id ? "Save Changes" : "Create Deal"}
             </button>
           </div>
         </div>

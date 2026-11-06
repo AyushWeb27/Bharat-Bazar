@@ -98,7 +98,11 @@ async function setupOrders() {
       id SERIAL PRIMARY KEY,
       order_id INTEGER NOT NULL UNIQUE REFERENCES customer_orders(id) ON DELETE CASCADE,
       status VARCHAR(30) NOT NULL DEFAULT 'requested'
-        CHECK (status IN ('requested', 'approved', 'rejected', 'received', 'refunded', 'cancelled')),
+        CHECK (status IN (
+          'requested', 'approved', 'pickup_scheduled', 'product_picked_up',
+          'warehouse_received', 'quality_inspection', 'refund_initiated',
+          'refund_completed', 'rejected', 'cancelled'
+        )),
       reason TEXT NOT NULL DEFAULT '',
       updated_by_admin_id INTEGER,
       requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -112,6 +116,91 @@ async function setupOrders() {
   await sql`
     ALTER TABLE customer_order_returns
     ADD COLUMN IF NOT EXISTS updated_by_admin_id INTEGER
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS customer_order_return_status_history (
+      id SERIAL PRIMARY KEY,
+      return_id INTEGER NOT NULL REFERENCES customer_order_returns(id) ON DELETE CASCADE,
+      status VARCHAR(30) NOT NULL
+        CHECK (status IN (
+          'requested', 'approved', 'pickup_scheduled', 'product_picked_up',
+          'warehouse_received', 'quality_inspection', 'refund_initiated',
+          'refund_completed', 'rejected', 'cancelled'
+        )),
+      changed_by_admin_id INTEGER,
+      changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    ALTER TABLE customer_order_returns
+    DROP CONSTRAINT IF EXISTS customer_order_returns_status_check
+  `;
+  await sql`
+    ALTER TABLE customer_order_return_status_history
+    DROP CONSTRAINT IF EXISTS customer_order_return_status_history_status_check
+  `;
+  await sql`
+    UPDATE customer_order_returns
+    SET status = CASE status
+      WHEN 'received' THEN 'warehouse_received'
+      WHEN 'refunded' THEN 'refund_completed'
+      ELSE status
+    END
+    WHERE status IN ('received', 'refunded')
+  `;
+  await sql`
+    UPDATE customer_order_return_status_history
+    SET status = CASE status
+      WHEN 'received' THEN 'warehouse_received'
+      WHEN 'refunded' THEN 'refund_completed'
+      ELSE status
+    END
+    WHERE status IN ('received', 'refunded')
+  `;
+  await sql`
+    ALTER TABLE customer_order_returns
+    ADD CONSTRAINT customer_order_returns_status_check
+    CHECK (status IN (
+      'requested', 'approved', 'pickup_scheduled', 'product_picked_up',
+      'warehouse_received', 'quality_inspection', 'refund_initiated',
+      'refund_completed', 'rejected', 'cancelled'
+    ))
+  `;
+  await sql`
+    ALTER TABLE customer_order_return_status_history
+    ADD CONSTRAINT customer_order_return_status_history_status_check
+    CHECK (status IN (
+      'requested', 'approved', 'pickup_scheduled', 'product_picked_up',
+      'warehouse_received', 'quality_inspection', 'refund_initiated',
+      'refund_completed', 'rejected', 'cancelled'
+    ))
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS customer_order_return_status_history_return_idx
+    ON customer_order_return_status_history (return_id, changed_at, id)
+  `;
+  await sql`
+    INSERT INTO customer_order_return_status_history (return_id, status, changed_at)
+    SELECT return_request.id, 'requested', return_request.requested_at
+    FROM customer_order_returns AS return_request
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM customer_order_return_status_history AS history
+      WHERE history.return_id = return_request.id
+    )
+  `;
+  await sql`
+    INSERT INTO customer_order_return_status_history (return_id, status, changed_at)
+    SELECT return_request.id, return_request.status, return_request.updated_at
+    FROM customer_order_returns AS return_request
+    WHERE return_request.status <> 'requested'
+      AND return_request.updated_at > return_request.requested_at
+      AND NOT EXISTS (
+        SELECT 1
+        FROM customer_order_return_status_history AS history
+        WHERE history.return_id = return_request.id
+          AND history.status = return_request.status
+      )
   `;
   await sql`
     INSERT INTO customer_order_status_history (order_id, status, changed_at)

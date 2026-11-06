@@ -31,7 +31,9 @@ function isProduct(value: unknown): value is Prod {
     Array.isArray(product.sizes) &&
     product.sizes.every(size => typeof size === "string") &&
     Boolean(product.spec && typeof product.spec === "object" && !Array.isArray(product.spec)) &&
-    (!("variants" in product) || (Array.isArray(product.variants) && product.variants.every(v => Boolean(v && typeof v === "object"))));
+    (!("variants" in product) || (Array.isArray(product.variants) && product.variants.every(v => Boolean(v && typeof v === "object")))) &&
+    (!("flashSaleName" in product) || typeof product.flashSaleName === "string") &&
+    (!("flashSaleEndDate" in product) || typeof product.flashSaleEndDate === "string");
 }
 
 export default function ProductDetail() {

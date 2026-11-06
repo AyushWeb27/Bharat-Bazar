@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Navigation, Package, Star,
-  PackageCheck, RefreshCw, Search, ShoppingBag, Truck, XCircle,
+  PackageCheck, RefreshCw, Search, ShoppingBag, Truck, XCircle, CalendarDays, ClipboardCheck,
+  IndianRupee,
 } from "lucide-react";
 import { G } from "../data/index";
 import type { Page } from "../types/index";
@@ -38,6 +39,7 @@ type CustomerOrder = {
   return_status: string | null;
   return_requested_at: string | null;
   return_reason: string | null;
+  return_status_history: { status: string; changedAt: string }[];
   return_eligible: boolean;
 };
 
@@ -76,6 +78,28 @@ const ORDER_STEPS = [
   { key: "out_for_delivery", label: "Out For Delivery", Icon: Navigation, color: "#ec4899" },
   { key: "delivered", label: "Delivered", Icon: CheckCircle2, color: "#009966" },
 ];
+const RETURN_STATUS_LABELS: Record<string, string> = {
+  requested: "Return Request Placed",
+  approved: "Return Request Approved",
+  pickup_scheduled: "Pickup Scheduled",
+  product_picked_up: "Product Picked Up",
+  warehouse_received: "Product Received at Warehouse",
+  quality_inspection: "Quality Inspection",
+  refund_initiated: "Refund Initiated",
+  refund_completed: "Refund Completed",
+  rejected: "Return Rejected",
+  cancelled: "Return Cancelled",
+};
+const RETURN_STEPS = [
+  { key: "requested", label: "Return Request Placed", Icon: Clock3 },
+  { key: "approved", label: "Return Request Approved", Icon: CheckCircle2 },
+  { key: "pickup_scheduled", label: "Pickup Scheduled", Icon: CalendarDays },
+  { key: "product_picked_up", label: "Product Picked Up", Icon: Truck },
+  { key: "warehouse_received", label: "Product Received at Warehouse", Icon: PackageCheck },
+  { key: "quality_inspection", label: "Quality Inspection", Icon: ClipboardCheck },
+  { key: "refund_initiated", label: "Refund Initiated", Icon: IndianRupee },
+  { key: "refund_completed", label: "Refund Completed", Icon: CheckCircle2 },
+];
 
 function isOrder(value: unknown): value is CustomerOrder {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -99,6 +123,13 @@ function isOrder(value: unknown): value is CustomerOrder {
     (typeof order.return_status === "string" || order.return_status === null) &&
     (typeof order.return_requested_at === "string" || order.return_requested_at === null) &&
     (typeof order.return_reason === "string" || order.return_reason === null) &&
+    Array.isArray(order.return_status_history) &&
+    order.return_status_history.every(event =>
+      Boolean(event) &&
+      typeof event === "object" &&
+      typeof event.status === "string" &&
+      typeof event.changedAt === "string"
+    ) &&
     typeof order.return_eligible === "boolean" &&
     Array.isArray(order.items) &&
     order.items.every(item => {
@@ -121,14 +152,18 @@ function statusKey(status: string) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    ? date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
     : "Date unavailable";
 }
 
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "Date unavailable";
-  const time = date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  const time = date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).toLowerCase();
   return `${time} · ${formatDate(value)}`;
 }
 
@@ -305,6 +340,13 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
           (typeof detail.return_status !== "string" && detail.return_status !== null) ||
           (typeof detail.return_requested_at !== "string" && detail.return_requested_at !== null) ||
           (typeof detail.return_reason !== "string" && detail.return_reason !== null) ||
+          !Array.isArray(detail.return_status_history) ||
+          !detail.return_status_history.every(event =>
+            Boolean(event) &&
+            typeof event === "object" &&
+            typeof (event as Record<string, unknown>).status === "string" &&
+            typeof (event as Record<string, unknown>).changedAt === "string"
+          ) ||
           typeof detail.return_eligible !== "boolean" ||
           !Array.isArray(detail.status_history) ||
           !detail.status_history.every(event =>
@@ -327,6 +369,7 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
             return_status: detail.return_status as string | null,
             return_requested_at: detail.return_requested_at as string | null,
             return_reason: detail.return_reason as string | null,
+            return_status_history: detail.return_status_history as CustomerOrder["return_status_history"],
             return_eligible: detail.return_eligible as boolean,
           }
         : item));
@@ -387,6 +430,10 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
               return_status: payload.returnStatus as string,
               return_requested_at: payload.requestedAt as string,
               return_reason: reason,
+              return_status_history: [
+                ...current.return_status_history,
+                { status: payload.returnStatus as string, changedAt: payload.requestedAt as string },
+              ],
               return_eligible: false,
             }
           : current));
@@ -756,6 +803,75 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
                                   )}
                                 </div>
                               </section>
+                              {order.return_status && (
+                                <section aria-label={`Return tracking for ${order.order_number}`}
+                                  className="mb-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4 sm:p-5 dark:border-amber-900/60 dark:bg-amber-950/15">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <h3 className="text-[11px] font-black uppercase tracking-wider text-foreground">Return Tracking Timeline</h3>
+                                      <p className="mt-1 text-[10px] text-muted-foreground">Updates from the returns team</p>
+                                    </div>
+                                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+                                      {RETURN_STATUS_LABELS[statusKey(order.return_status)] ?? order.return_status}
+                                    </span>
+                                  </div>
+                                  <div className="mt-4 space-y-0">
+                                    {RETURN_STEPS.map((step, index) => {
+                                      const event = order.return_status_history.find(item => statusKey(item.status) === step.key);
+                                      const isLatest = statusKey(order.return_status || "") === step.key;
+                                      const StepIcon = step.Icon;
+                                      return (
+                                        <div key={step.key} className="relative flex min-h-12 items-start gap-3">
+                                          {index < RETURN_STEPS.length - 1 && (
+                                            <span aria-hidden="true" className={`absolute left-[9px] top-5 h-[calc(100%-5px)] w-0.5 ${event ? "bg-amber-300 dark:bg-amber-800" : "bg-border"}`} />
+                                          )}
+                                          <span className={`relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 bg-card ${
+                                            event
+                                              ? "border-amber-600 text-amber-600"
+                                              : "border-gray-300 text-gray-400 dark:border-gray-700 dark:text-gray-500"
+                                          }`}>
+                                            <StepIcon size={11} className="m-auto" />
+                                          </span>
+                                          <div className="pb-3">
+                                            <p className={`text-xs font-bold ${event ? "text-foreground" : "text-muted-foreground"}`}>
+                                              {step.label}
+                                              {isLatest && (
+                                                <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+                                                  Current status
+                                                </span>
+                                              )}
+                                            </p>
+                                            <p className="mt-0.5 text-[10px] text-muted-foreground">{event ? formatDateTime(event.changedAt) : "Pending"}</p>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                    {["rejected", "cancelled"].includes(statusKey(order.return_status)) && (
+                                      <div className="flex items-start gap-3">
+                                        <span className="relative z-10 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-rose-500 bg-card text-rose-500">
+                                          <XCircle size={11} />
+                                        </span>
+                                        <div className="pb-3">
+                                          <p className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                                            {RETURN_STATUS_LABELS[statusKey(order.return_status)]}
+                                            <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[9px] font-black dark:bg-rose-950/50">
+                                              Current status
+                                            </span>
+                                          </p>
+                                          <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                            {formatDateTime(order.return_status_history.find(event => statusKey(event.status) === statusKey(order.return_status || ""))?.changedAt || order.return_requested_at || "")}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {order.return_reason && (
+                                    <p className="border-t border-amber-200 pt-3 text-[10px] text-muted-foreground dark:border-amber-900/60">
+                                      Reason: {order.return_reason}
+                                    </p>
+                                  )}
+                                </section>
+                              )}
                               <div className="divide-y divide-border">
                                 {order.items.map((item, index) => (
                                   <div key={`${order.id}-detail-${index}`} className="flex min-w-0 items-center gap-3 py-3 first:pt-0 last:pb-0">

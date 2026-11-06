@@ -64,13 +64,25 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    ```
    Run this after `npm run db:products`. The setup seeds the supplied GST, CGST, SGST, UTGST, IGST, and Compensation Cess rules. Variable-rate rules retain their descriptive rate label and stay unavailable for product calculations until a numeric rate is configured. Product selling prices are stored before tax, with the selected active tax rule rate and the calculated tax-inclusive price stored separately. Tax category/scope labels describe tax applicability; admins must choose the correct rule for the sale.
 
-9. **Create the store banner table in Neon**:
+9. **Create the flash sale tables in Neon**:
+   ```bash
+   npm run db:flash-sales
+   ```
+   This creates persisted flash sale campaigns and product links. Admins can manage campaigns from the Flash Sales page; enabled campaigns within their scheduled dates appear on the storefront home page, and their discounts are revalidated when cart/checkout prices are loaded.
+
+10. **Create the Deal of the Day table in Neon**:
+   ```bash
+   npm run db:deal-of-day
+   ```
+   Admins can schedule multiple daily deals, choose one featured product per date, and control which deals appear on the storefront. Active Deal of the Day discounts are revalidated when product, cart, and checkout prices are loaded.
+
+11. **Create the store banner table in Neon**:
    ```bash
    npm run db:banners
    ```
    Create an S3-compatible object storage bucket named `banners` and configure `AWS_BANNERS_BUCKET_NAME=banners` with the storage credentials above. Active hero banners with valid display dates appear in the storefront home slider.
 
-10. **Build for production**:
+12. **Build for production**:
    ```bash
    npm run build
    npm run start
