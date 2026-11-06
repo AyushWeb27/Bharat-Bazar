@@ -3,12 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowRight, Check, ChevronDown, Clock3, Package, RefreshCw, Search,
-  ShoppingBag, Truck, XCircle,
+  ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Navigation, Package,
+  PackageCheck, RefreshCw, Search, ShoppingBag, Truck, XCircle,
 } from "lucide-react";
 import { G } from "../data/index";
 import type { Page } from "../types/index";
 import { fmt } from "../utils/format";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "../ui/dialog";
+import { Textarea } from "../ui/textarea";
 
 type OrderItem = {
   productName: string;
@@ -28,12 +32,48 @@ type CustomerOrder = {
   created_at: string;
   item_count: number;
   items: OrderItem[];
+  status_history: { status: string; changedAt: string; reason?: string | null }[];
+  return_status: string | null;
+  return_requested_at: string | null;
+  return_reason: string | null;
+  return_eligible: boolean;
 };
 
 type OrderFilter = "All" | "Active" | "Delivered" | "Cancelled";
 
 const FILTERS: OrderFilter[] = ["All", "Active", "Delivered", "Cancelled"];
-const ACTIVE_STATUSES = new Set(["placed", "processing", "shipped", "out_for_delivery"]);
+const ACTIVE_STATUSES = new Set([
+  "pending", "placed", "received", "processing", "processed", "shipped", "out_for_delivery",
+]);
+const CANCELLABLE_STATUSES = new Set([
+  "pending", "placed", "received", "confirmed", "processing", "processed",
+]);
+const ORDER_ACTION_REASONS = {
+  cancel: [
+    "I changed my mind",
+    "I placed this order by mistake",
+    "I need to change the order",
+    "I found a better price",
+    "Delivery is taking too long",
+    "Other",
+  ],
+  return: [
+    "Item is damaged or defective",
+    "I received the wrong item",
+    "Item is not as described",
+    "Parts or accessories are missing",
+    "I changed my mind",
+    "Other",
+  ],
+};
+const ORDER_STEPS = [
+  { key: "pending", label: "Pending", Icon: Clock3, color: "#f59e0b" },
+  { key: "received", label: "Received", Icon: PackageCheck, color: "#0d9488" },
+  { key: "processed", label: "Processed", Icon: Package, color: "#3b82f6" },
+  { key: "shipped", label: "Shipped", Icon: Truck, color: "#8b5cf6" },
+  { key: "out_for_delivery", label: "Out For Delivery", Icon: Navigation, color: "#ec4899" },
+  { key: "delivered", label: "Delivered", Icon: CheckCircle2, color: "#009966" },
+];
 
 function isOrder(value: unknown): value is CustomerOrder {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -46,6 +86,18 @@ function isOrder(value: unknown): value is CustomerOrder {
     (typeof order.total_amount === "number" || typeof order.total_amount === "string") &&
     typeof order.created_at === "string" &&
     typeof order.item_count === "number" &&
+    Array.isArray(order.status_history) &&
+    order.status_history.every(event =>
+      Boolean(event) &&
+      typeof event === "object" &&
+      typeof event.status === "string" &&
+      typeof event.changedAt === "string" &&
+      (event.reason === undefined || typeof event.reason === "string" || event.reason === null)
+    ) &&
+    (typeof order.return_status === "string" || order.return_status === null) &&
+    (typeof order.return_requested_at === "string" || order.return_requested_at === null) &&
+    (typeof order.return_reason === "string" || order.return_reason === null) &&
+    typeof order.return_eligible === "boolean" &&
     Array.isArray(order.items) &&
     order.items.every(item => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return false;
@@ -69,9 +121,27 @@ function formatDate(value: string) {
     : "Date unavailable";
 }
 
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Date unavailable";
+  const time = date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  return `${time} · ${formatDate(value)}`;
+}
+
 function formatAmount(value: number | string) {
   const parsed = Number(value);
   return fmt(Number.isFinite(parsed) ? parsed : 0);
+}
+
+function statusStepIndex(status: string) {
+  const key = statusKey(status);
+  if (["pending", "placed"].includes(key)) return 0;
+  if (["received", "confirmed"].includes(key)) return 1;
+  if (["processed", "processing"].includes(key)) return 2;
+  if (["shipped", "in_transit"].includes(key)) return 3;
+  if (key === "out_for_delivery") return 4;
+  if (["delivered", "completed"].includes(key)) return 5;
+  return -1;
 }
 
 function statusPresentation(status: string) {
@@ -92,13 +162,23 @@ function statusPresentation(status: string) {
   }
   if (key === "out_for_delivery") {
     return {
-      label: "Out for delivery",
+      label: "Out For Delivery",
       classes: "bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300",
       Icon: Truck,
     };
   }
+  const labels: Record<string, string> = {
+    pending: "Pending",
+    placed: "Pending",
+    received: "Received",
+    confirmed: "Received",
+    processing: "Processed",
+    processed: "Processed",
+    shipped: "Shipped",
+    in_transit: "Shipped",
+  };
   return {
-    label: status.replace(/[_-]+/g, " "),
+    label: labels[key] ?? status.replace(/[_-]+/g, " "),
     classes: "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
     Icon: Clock3,
   };
@@ -113,6 +193,14 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
   const [error, setError] = useState("");
   const [signedOut, setSignedOut] = useState(false);
   const [reload, setReload] = useState(0);
+  const [timelineLoadingOrder, setTimelineLoadingOrder] = useState<number | null>(null);
+  const [timelineError, setTimelineError] = useState("");
+  const [actionBusyOrder, setActionBusyOrder] = useState<number | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ orderId: number; message: string; error: boolean } | null>(null);
+  const [actionDialog, setActionDialog] = useState<{ order: CustomerOrder; action: "cancel" | "return" } | null>(null);
+  const [selectedActionReason, setSelectedActionReason] = useState("");
+  const [actionReason, setActionReason] = useState("");
+  const [actionDialogError, setActionDialogError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -175,7 +263,135 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
     Cancelled: orders.filter(order => ["cancelled", "refunded"].includes(statusKey(order.status))).length,
   };
 
+  async function toggleOrderTimeline(order: CustomerOrder, expanded: boolean) {
+    if (expanded) {
+      setExpandedOrder(null);
+      setTimelineError("");
+      return;
+    }
+
+    setExpandedOrder(order.id);
+    setTimelineLoadingOrder(order.id);
+    setTimelineError("");
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(order.order_number)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("order" in result) || !result.order ||
+          typeof result.order !== "object" || Array.isArray(result.order)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string"
+          ? result.message : "Could not load this order timeline.";
+        throw new Error(message);
+      }
+
+      const detail = result.order as Record<string, unknown>;
+      if (typeof detail.status !== "string" ||
+          (typeof detail.return_status !== "string" && detail.return_status !== null) ||
+          (typeof detail.return_requested_at !== "string" && detail.return_requested_at !== null) ||
+          (typeof detail.return_reason !== "string" && detail.return_reason !== null) ||
+          typeof detail.return_eligible !== "boolean" ||
+          !Array.isArray(detail.status_history) ||
+          !detail.status_history.every(event =>
+            Boolean(event) &&
+            typeof event === "object" &&
+            typeof (event as Record<string, unknown>).status === "string" &&
+            typeof (event as Record<string, unknown>).changedAt === "string" &&
+            ((event as Record<string, unknown>).reason === undefined ||
+              typeof (event as Record<string, unknown>).reason === "string" ||
+              (event as Record<string, unknown>).reason === null)
+          )) {
+        throw new Error("The order timeline response was invalid. Please try again.");
+      }
+
+      setOrders(current => current.map(item => item.id === order.id
+        ? {
+            ...item,
+            status: detail.status as string,
+            status_history: detail.status_history as CustomerOrder["status_history"],
+            return_status: detail.return_status as string | null,
+            return_requested_at: detail.return_requested_at as string | null,
+            return_reason: detail.return_reason as string | null,
+            return_eligible: detail.return_eligible as boolean,
+          }
+        : item));
+    } catch (loadError) {
+      console.error("Failed to load order timeline:", loadError);
+      setTimelineError(loadError instanceof Error ? loadError.message : "Could not load this order timeline.");
+    } finally {
+      setTimelineLoadingOrder(current => current === order.id ? null : current);
+    }
+  }
+
+  async function submitOrderAction(order: CustomerOrder, action: "cancel" | "return", reason: string) {
+    setActionBusyOrder(order.id);
+    setActionFeedback(null);
+    setActionDialogError("");
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(order.order_number)}/actions`, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string"
+          ? result.message : "Could not update this order.";
+        throw new Error(message);
+      }
+
+      const payload = result as Record<string, unknown>;
+      if (action === "cancel") {
+        if (typeof payload.status !== "string" || typeof payload.changedAt !== "string") {
+          throw new Error("The cancellation response was invalid.");
+        }
+        setOrders(previous => previous.map(current => current.id === order.id
+          ? {
+              ...current,
+              status: payload.status as string,
+              status_history: [...current.status_history, {
+                status: payload.status as string,
+                changedAt: payload.changedAt as string,
+                reason,
+              }],
+            }
+          : current));
+        setActionFeedback({ orderId: order.id, message: "Your order has been cancelled.", error: false });
+        setActionDialog(null);
+      } else {
+        if (typeof payload.returnStatus !== "string" || typeof payload.requestedAt !== "string") {
+          throw new Error("The return request response was invalid.");
+        }
+        setOrders(previous => previous.map(current => current.id === order.id
+          ? {
+              ...current,
+              return_status: payload.returnStatus as string,
+              return_requested_at: payload.requestedAt as string,
+              return_reason: reason,
+              return_eligible: false,
+            }
+          : current));
+        setActionFeedback({ orderId: order.id, message: "Your return request has been submitted.", error: false });
+        setActionDialog(null);
+      }
+    } catch (actionError) {
+      console.error(`Failed to ${action} order:`, actionError);
+      setActionDialogError(actionError instanceof Error ? actionError.message : "Could not update this order.");
+    } finally {
+      setActionBusyOrder(null);
+    }
+  }
+
   return (
+    <>
     <main className="mx-auto max-w-5xl space-y-5 pb-8">
       <section className="relative isolate overflow-hidden rounded-[2rem] bg-[#073d2d] px-5 py-7 text-white shadow-[0_24px_70px_-38px_rgba(4,70,48,0.8)] sm:px-8 sm:py-9">
         <div aria-hidden="true" className="pointer-events-none absolute -right-14 -top-20 -z-10 h-64 w-64 rounded-full border-[38px] border-white/[0.05]" />
@@ -288,6 +504,12 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
                   const presentation = statusPresentation(order.status);
                   const StatusIcon = presentation.Icon;
                   const expanded = expandedOrder === order.id;
+                  const currentStepIndex = statusStepIndex(order.status);
+                  const isCancelled = ["cancelled", "canceled", "refunded"].includes(statusKey(order.status));
+                  const canCancel = CANCELLABLE_STATUSES.has(statusKey(order.status));
+                  const cancellationEvent = order.status_history.filter(event =>
+                    ["cancelled", "canceled", "refunded"].includes(statusKey(event.status))
+                  ).slice(-1)[0];
                   return (
                     <motion.article key={order.id} layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                       className="overflow-hidden rounded-2xl border border-border bg-card transition hover:border-emerald-700/30 hover:shadow-[0_12px_30px_-24px_rgba(4,70,48,0.55)]">
@@ -322,24 +544,159 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between gap-4 border-t border-border pt-3 sm:border-0 sm:pt-0">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 sm:justify-end sm:border-0 sm:pt-0">
                           <div className="sm:text-right">
                             <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">Order total</p>
                             <p className="mt-0.5 text-lg font-black text-foreground">{formatAmount(order.total_amount)}</p>
                           </div>
-                          <button type="button" onClick={() => setExpandedOrder(expanded ? null : order.id)}
-                            aria-expanded={expanded}
-                            className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-[10px] font-black text-foreground transition hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30">
-                            Details <ChevronDown size={13} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {canCancel && (
+                              <button type="button" disabled={actionBusyOrder === order.id}
+                                onClick={() => {
+                                  setSelectedActionReason("");
+                                  setActionReason("");
+                                  setActionDialogError("");
+                                  setActionDialog({ order, action: "cancel" });
+                                }}
+                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 px-3 py-2.5 text-[10px] font-black text-rose-700 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/30">
+                                {actionBusyOrder === order.id ? "Please wait…" : "Cancel order"}
+                              </button>
+                            )}
+                            {order.return_eligible && (
+                              <button type="button" disabled={actionBusyOrder === order.id}
+                                onClick={() => {
+                                  setSelectedActionReason("");
+                                  setActionReason("");
+                                  setActionDialogError("");
+                                  setActionDialog({ order, action: "return" });
+                                }}
+                                className="inline-flex items-center justify-center rounded-xl border border-amber-200 px-3 py-2.5 text-[10px] font-black text-amber-800 transition hover:bg-amber-50 disabled:cursor-wait disabled:opacity-60 dark:border-amber-900 dark:text-amber-300 dark:hover:bg-amber-950/30">
+                                {actionBusyOrder === order.id ? "Please wait…" : "Request return"}
+                              </button>
+                            )}
+                            <button type="button" onClick={() => void toggleOrderTimeline(order, expanded)}
+                              aria-expanded={expanded}
+                              className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-[10px] font-black text-foreground transition hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30">
+                              {timelineLoadingOrder === order.id ? "Loading timeline…" : "Timeline & details"}
+                              <ChevronDown size={13} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+                            </button>
+                          </div>
                         </div>
                       </div>
+
+                      {(order.return_status || actionFeedback?.orderId === order.id) && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 sm:px-5">
+                          {order.return_status && (
+                            <div>
+                              <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                                Return {order.return_status.replace(/[_-]+/g, " ")}
+                                {order.return_requested_at && ` · ${formatDateTime(order.return_requested_at)}`}
+                              </p>
+                              {order.return_reason && (
+                                <p className="mt-1 text-[10px] text-muted-foreground">Reason: {order.return_reason}</p>
+                              )}
+                            </div>
+                          )}
+                          {actionFeedback?.orderId === order.id && (
+                            <p role={actionFeedback.error ? "alert" : "status"}
+                              className={`text-[10px] font-semibold ${actionFeedback.error ? "text-rose-700 dark:text-rose-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                              {actionFeedback.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       <AnimatePresence initial={false}>
                         {expanded && (
                           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
                             className="overflow-hidden">
                             <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+                              {timelineError && expandedOrder === order.id && (
+                                <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:border-rose-900 dark:bg-rose-950/25 dark:text-rose-300">
+                                  <span>{timelineError}</span>
+                                  <button type="button" onClick={() => void toggleOrderTimeline(order, false)}
+                                    className="font-black underline">
+                                    Retry
+                                  </button>
+                                </div>
+                              )}
+                              <section aria-label={`Order timeline for ${order.order_number}`}
+                                className="mb-5 rounded-2xl border border-border bg-card p-4 sm:p-5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <h3 className="text-[11px] font-black uppercase tracking-wider text-foreground">Order Timeline</h3>
+                                  <span className="text-[10px] text-muted-foreground">Placed {formatDateTime(order.created_at)}</span>
+                                </div>
+                                <div className="mt-4">
+                                  {timelineLoadingOrder === order.id && (
+                                    <p role="status" className="mb-3 text-[10px] font-semibold text-muted-foreground">
+                                      Fetching latest status updates…
+                                    </p>
+                                  )}
+                                  {ORDER_STEPS.map((step, index) => {
+                                    const StepIcon = step.Icon;
+                                    const isDone = currentStepIndex >= index;
+                                    const isCurrent = currentStepIndex === index;
+                                    const statusEvent = order.status_history
+                                      .filter(event => statusStepIndex(event.status) === index)
+                                      .slice(-1)[0];
+                                    return (
+                                      <div key={step.key} className="relative flex min-h-11 items-start gap-3">
+                                        {index < ORDER_STEPS.length - 1 && (
+                                          <span aria-hidden="true"
+                                            className="absolute left-[11px] top-6 h-[calc(100%-5px)] w-0.5 rounded-full"
+                                            style={{ backgroundColor: isDone && currentStepIndex > index ? step.color : "var(--border)" }} />
+                                        )}
+                                        <span className="relative z-10 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2"
+                                          style={isDone
+                                            ? { backgroundColor: `${step.color}15`, borderColor: step.color, color: step.color }
+                                            : { backgroundColor: "var(--card)", borderColor: "var(--border)", color: "var(--muted-foreground)" }}>
+                                          <StepIcon size={11} />
+                                        </span>
+                                        <div className="pb-3">
+                                          <p className={`text-xs font-bold ${isDone ? "text-foreground" : "text-muted-foreground"}`}>
+                                            {step.label}
+                                            {isCurrent && (
+                                              <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                                Current status
+                                              </span>
+                                            )}
+                                          </p>
+                                          {statusEvent && (
+                                            <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                              {formatDateTime(statusEvent.changedAt)}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {isCancelled && (
+                                    <div className="flex items-start gap-3 pt-1">
+                                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-rose-500 bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+                                        <XCircle size={11} />
+                                      </span>
+                                      <div>
+                                        <p className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                                          {statusKey(order.status) === "refunded" ? "Refunded" : "Cancelled"}
+                                          <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[9px] font-black dark:bg-rose-950/50">
+                                            Current status
+                                          </span>
+                                          {cancellationEvent && (
+                                            <span className="ml-2 text-[10px] font-medium text-muted-foreground">
+                                              {formatDateTime(cancellationEvent.changedAt)}
+                                            </span>
+                                          )}
+                                        </p>
+                                        {cancellationEvent?.reason && (
+                                          <p className="mt-1 text-[10px] text-muted-foreground">
+                                            Reason: {cancellationEvent.reason}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </section>
                               <div className="divide-y divide-border">
                                 {order.items.map((item, index) => (
                                   <div key={`${order.id}-detail-${index}`} className="flex min-w-0 items-center gap-3 py-3 first:pt-0 last:pb-0">
@@ -381,5 +738,101 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
         </div>
       </section>
     </main>
+      <Dialog
+        open={actionDialog !== null}
+        onOpenChange={open => {
+          if (!open && actionBusyOrder === null) {
+            setActionDialog(null);
+            setActionDialogError("");
+          }
+        }}
+      >
+        {actionDialog && (
+          <DialogContent>
+            <form
+              onSubmit={event => {
+                event.preventDefault();
+                if (actionReason.trim().length < 5) {
+                  setActionDialogError("Please enter at least 5 characters.");
+                  return;
+                }
+                void submitOrderAction(actionDialog.order, actionDialog.action, actionReason.trim());
+              }}
+            >
+              <DialogHeader>
+                <DialogTitle>
+                  {actionDialog.action === "cancel" ? "Why are you cancelling?" : "Why are you returning this order?"}
+                </DialogTitle>
+                <DialogDescription>
+                  Order {actionDialog.order.order_number}. Your reason will be saved with this request.
+                  {actionDialog.action === "cancel" && " Cancellation cannot be undone."}
+                </DialogDescription>
+              </DialogHeader>
+              <label htmlFor="order-action-reason" className="mt-4 block text-sm font-semibold text-foreground">
+                Choose a reason <span className="text-rose-600">*</span>
+              </label>
+              <select
+                value={selectedActionReason}
+                onChange={event => {
+                  const selected = event.target.value;
+                  setSelectedActionReason(selected);
+                  setActionReason(selected && selected !== "Other" ? selected : "");
+                  setActionDialogError("");
+                }}
+                disabled={actionBusyOrder !== null}
+                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Select a reason…</option>
+                {ORDER_ACTION_REASONS[actionDialog.action].map(reason => (
+                  <option key={reason} value={reason}>{reason}</option>
+                ))}
+              </select>
+              <label htmlFor="order-action-reason" className="mt-4 block text-sm font-semibold text-foreground">
+                Reason details <span className="text-rose-600">*</span>
+              </label>
+              <Textarea
+                id="order-action-reason"
+                required
+                minLength={5}
+                maxLength={500}
+                rows={4}
+                value={actionReason}
+                onChange={event => {
+                  setActionReason(event.target.value);
+                  setActionDialogError("");
+                }}
+                placeholder={selectedActionReason === "Other"
+                  ? "Please describe your reason…"
+                  : "Add any helpful details…"}
+                disabled={actionBusyOrder !== null}
+                className="mt-2"
+              />
+              <p className="mt-1 text-right text-[11px] text-muted-foreground">{actionReason.length}/500</p>
+              {actionDialogError && (
+                <p role="alert" className="mt-2 text-sm font-medium text-rose-700 dark:text-rose-300">
+                  {actionDialogError}
+                </p>
+              )}
+              <DialogFooter className="mt-5">
+                <button type="button" disabled={actionBusyOrder !== null}
+                  onClick={() => setActionDialog(null)}
+                  className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground disabled:opacity-60">
+                  Keep order
+                </button>
+                <button type="submit"
+                  disabled={actionBusyOrder !== null || actionReason.trim().length < 5}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+                    actionDialog.action === "cancel" ? "bg-rose-700" : "bg-amber-700"
+                  }`}>
+                  {actionBusyOrder !== null
+                    ? "Submitting…"
+                    : actionDialog.action === "cancel" ? "Confirm cancellation" : "Submit return request"}
+                </button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
+    </>
   );
 }

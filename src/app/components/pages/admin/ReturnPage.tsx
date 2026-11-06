@@ -1,284 +1,403 @@
-import { useState } from "react";
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { RotateCcw, CheckCircle2, XCircle, IndianRupee, Clock, Eye, X, Package } from "lucide-react";
+import {
+  RotateCcw, CheckCircle2, XCircle, IndianRupee, Clock, Eye,
+  Package, RefreshCw, Truck, Search,
+} from "lucide-react";
 import { Modal, PageHeader, StatCard, SectionCard, SearchBar } from "./shared/ui";
-import { G, fmt, inp } from "./shared/constants";
+import { G, fmt } from "./shared/constants";
 
-type ReturnStatus = "Requested" | "Approved" | "Rejected" | "Refunded" | "Replaced";
-
-type ReturnItem = {
-  id: string;
+type ReturnStatus = "requested" | "approved" | "rejected" | "received" | "refunded" | "cancelled";
+type ReturnProduct = { product: string; variant: string; quantity: number };
+type ReturnRequest = {
+  id: number;
   orderId: string;
   customer: string;
-  product: string;
-  qty: number;
+  email: string;
+  phone: string;
+  products: ReturnProduct[];
   amount: number;
+  paymentMethod: string;
+  paymentStatus: string;
   reason: string;
   status: ReturnStatus;
-  requestedOn: string;
-  resolvedOn: string | null;
-  refundMode: "original" | "wallet" | "replacement";
-  image: string;
+  requestedAt: string;
+  updatedAt: string;
 };
 
 const STATUS_META: Record<ReturnStatus, { color: string; bg: string; icon: React.ElementType; label: string }> = {
-  Requested: { color: "#f59e0b", bg: "#fffbeb", icon: Clock,        label: "Requested"  },
-  Approved:  { color: "#3b82f6", bg: "#eff6ff", icon: CheckCircle2, label: "Approved"   },
-  Rejected:  { color: "#ef4444", bg: "#fef2f2", icon: XCircle,      label: "Rejected"   },
-  Refunded:  { color: "#009966", bg: "#e8fff6", icon: IndianRupee,  label: "Refunded"   },
-  Replaced:  { color: "#8b5cf6", bg: "#f5f3ff", icon: Package,      label: "Replaced"   },
+  requested: { color: "#f59e0b", bg: "#fffbeb", icon: Clock, label: "Requested" },
+  approved: { color: "#3b82f6", bg: "#eff6ff", icon: CheckCircle2, label: "Approved" },
+  rejected: { color: "#ef4444", bg: "#fef2f2", icon: XCircle, label: "Rejected" },
+  received: { color: "#8b5cf6", bg: "#f5f3ff", icon: Package, label: "Item received" },
+  refunded: { color: "#009966", bg: "#e8fff6", icon: IndianRupee, label: "Refunded" },
+  cancelled: { color: "#6b7280", bg: "#f3f4f6", icon: XCircle, label: "Cancelled" },
 };
 
-const REASONS = [
-  "Damaged / defective product",
-  "Wrong item delivered",
-  "Product not as described",
-  "Size / quantity mismatch",
-  "Better price available",
-  "Changed my mind",
-  "Late delivery",
+const STATUS_OPTIONS: Record<ReturnStatus, ReturnStatus[]> = {
+  requested: ["approved", "rejected", "cancelled"],
+  approved: ["received", "refunded", "cancelled"],
+  received: ["refunded"],
+  rejected: [],
+  refunded: [],
+  cancelled: [],
+};
+
+const STATUS_FILTERS: Array<ReturnStatus | "all"> = [
+  "all", "requested", "approved", "received", "refunded", "rejected", "cancelled",
 ];
 
-const EMOJI_AVATARS = ["🧑","👩","👨","🧔","👩‍🦱","👨‍🦰","🧑‍🦳","👴","👵"];
-const emojiFor = (name: string) => EMOJI_AVATARS[name.charCodeAt(0) % EMOJI_AVATARS.length];
+function isReturnProduct(value: unknown): value is ReturnProduct {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const product = value as Record<string, unknown>;
+  return typeof product.product === "string" &&
+    typeof product.variant === "string" &&
+    typeof product.quantity === "number";
+}
 
-const INIT_RETURNS: ReturnItem[] = [
-  { id: "RET-1041", orderId: "BB-28990", customer: "Ankit Sharma",   product: "Mixer Grinder 750W",        qty: 1, amount: 2499, reason: "Damaged / defective product",    status: "Requested",  requestedOn: "5 Sep 2026", resolvedOn: null,          refundMode: "original",    image: "" },
-  { id: "RET-1040", orderId: "BB-28876", customer: "Deepa Pillai",   product: "Samsung Galaxy Tab S8",     qty: 1, amount: 12499,reason: "Wrong item delivered",            status: "Approved",   requestedOn: "4 Sep 2026", resolvedOn: null,          refundMode: "original",    image: "" },
-  { id: "RET-1039", orderId: "BB-28741", customer: "Ravi Shankar",   product: "Kurti Set",                 qty: 2, amount: 890,  reason: "Size / quantity mismatch",        status: "Refunded",   requestedOn: "3 Sep 2026", resolvedOn: "4 Sep 2026",  refundMode: "wallet",      image: "" },
-  { id: "RET-1038", orderId: "BB-28512", customer: "Priya Singh",    product: "Prestige Cooker 5L",        qty: 1, amount: 4999, reason: "Product not as described",        status: "Rejected",   requestedOn: "2 Sep 2026", resolvedOn: "3 Sep 2026",  refundMode: "original",    image: "" },
-  { id: "RET-1037", orderId: "BB-28300", customer: "Kavya Menon",    product: "OnePlus Earbuds Pro",       qty: 1, amount: 2499, reason: "Damaged / defective product",    status: "Replaced",   requestedOn: "1 Sep 2026", resolvedOn: "3 Sep 2026",  refundMode: "replacement", image: "" },
-  { id: "RET-1036", orderId: "BB-28100", customer: "Vikash Gupta",   product: "Rajasthani Bedsheet",       qty: 1, amount: 699,  reason: "Product not as described",        status: "Refunded",   requestedOn: "30 Aug 2026",resolvedOn: "1 Sep 2026",  refundMode: "original",    image: "" },
-  { id: "RET-1035", orderId: "BB-27980", customer: "Sneha Reddy",    product: "Basmati Rice 5kg",          qty: 3, amount: 960,  reason: "Wrong item delivered",            status: "Requested",  requestedOn: "5 Sep 2026", resolvedOn: null,          refundMode: "original",    image: "" },
-  { id: "RET-1034", orderId: "BB-27850", customer: "Sunil Krishnan", product: "Assam Tea 500g",            qty: 2, amount: 340,  reason: "Changed my mind",                 status: "Rejected",   requestedOn: "29 Aug 2026",resolvedOn: "30 Aug 2026", refundMode: "original",    image: "" },
-  { id: "RET-1033", orderId: "BB-27700", customer: "Meera Iyer",     product: "Knife Set",                 qty: 1, amount: 580,  reason: "Damaged / defective product",    status: "Approved",   requestedOn: "4 Sep 2026", resolvedOn: null,          refundMode: "replacement", image: "" },
-  { id: "RET-1032", orderId: "BB-27500", customer: "Arjun Mehta",    product: "Honey 500g",                qty: 4, amount: 720,  reason: "Product not as described",        status: "Refunded",   requestedOn: "28 Aug 2026",resolvedOn: "30 Aug 2026", refundMode: "wallet",      image: "" },
-];
+function isReturnRequest(value: unknown): value is ReturnRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  return typeof request.id === "number" &&
+    typeof request.orderId === "string" &&
+    typeof request.customer === "string" &&
+    typeof request.email === "string" &&
+    typeof request.phone === "string" &&
+    Array.isArray(request.products) && request.products.every(isReturnProduct) &&
+    typeof request.amount === "number" &&
+    typeof request.paymentMethod === "string" &&
+    typeof request.paymentStatus === "string" &&
+    typeof request.reason === "string" &&
+    typeof request.status === "string" && request.status in STATUS_META &&
+    typeof request.requestedAt === "string" &&
+    typeof request.updatedAt === "string";
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString("en-IN", {
+        day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
+      })
+    : "Date unavailable";
+}
 
 export function ReturnPage() {
-  const [items, setItems]   = useState(INIT_RETURNS);
-  const [q, setQ]           = useState("");
-  const [statusF, setStatusF] = useState<ReturnStatus | "All">("All");
-  const [detail, setDetail] = useState<ReturnItem | null>(null);
+  const [items, setItems] = useState<ReturnRequest[]>([]);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ReturnStatus | "all">("all");
+  const [detail, setDetail] = useState<ReturnRequest | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState("");
 
-  const ALL_STATUSES: ReturnStatus[] = ["Requested","Approved","Rejected","Refunded","Replaced"];
+  const loadReturns = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/returns", {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("returns" in result) || !Array.isArray(result.returns) ||
+          !result.returns.every(isReturnRequest)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not load return requests.";
+        throw new Error(message);
+      }
+      setItems(result.returns);
+    } catch (loadError) {
+      if (!signal?.aborted) {
+        console.error("Failed to load admin return requests:", loadError);
+        setError(loadError instanceof Error ? loadError.message : "Could not load return requests.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
 
-  const filtered = items.filter(r => {
-    const qOk = !q || r.id.toLowerCase().includes(q.toLowerCase()) || r.customer.toLowerCase().includes(q.toLowerCase()) || r.product.toLowerCase().includes(q.toLowerCase());
-    const sOk  = statusF === "All" || r.status === statusF;
-    return qOk && sOk;
-  });
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadReturns(controller.signal);
+    return () => controller.abort();
+  }, [loadReturns]);
 
-  const counts   = ALL_STATUSES.reduce((acc, s) => ({ ...acc, [s]: items.filter(r => r.status === s).length }), {} as Record<ReturnStatus, number>);
-  const refunded = items.filter(r => r.status === "Refunded").reduce((s, r) => s + r.amount, 0);
-  const pending  = items.filter(r => r.status === "Requested" || r.status === "Approved").length;
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return items.filter(item => {
+      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesTerm = !term || [
+        String(item.id), item.orderId, item.customer, item.email, item.phone, item.reason,
+        ...item.products.map(product => product.product),
+      ].some(value => value.toLowerCase().includes(term));
+      return matchesStatus && matchesTerm;
+    });
+  }, [items, q, statusFilter]);
 
-  const updateStatus = (id: string, status: ReturnStatus) => {
-    setItems(p => p.map(r => r.id === id ? { ...r, status, resolvedOn: ["Refunded","Rejected","Replaced"].includes(status) ? "5 Sep 2026" : r.resolvedOn } : r));
-    if (detail?.id === id) setDetail(p => p ? { ...p, status } : p);
-  };
+  const counts = useMemo(() => ({
+    requested: items.filter(item => item.status === "requested").length,
+    approved: items.filter(item => item.status === "approved").length,
+    resolved: items.filter(item => ["refunded", "rejected", "cancelled"].includes(item.status)).length,
+    refunded: items.filter(item => item.status === "refunded").reduce((total, item) => total + item.amount, 0),
+  }), [items]);
+
+  const reasonBreakdown = useMemo(() => {
+    const frequencies = new Map<string, number>();
+    for (const item of items) {
+      const reason = item.reason.trim() || "No reason provided";
+      frequencies.set(reason, (frequencies.get(reason) ?? 0) + 1);
+    }
+    return Array.from(frequencies.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [items]);
+
+  async function updateStatus(item: ReturnRequest, status: ReturnStatus) {
+    setUpdatingId(item.id);
+    setActionError("");
+    try {
+      const response = await fetch("/api/admin/returns", {
+        method: "PATCH",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id, status }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("returnRequest" in result) || !result.returnRequest ||
+          typeof result.returnRequest !== "object" || Array.isArray(result.returnRequest)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not update this return request.";
+        throw new Error(message);
+      }
+
+      const updated = result.returnRequest as Record<string, unknown>;
+      if (updated.id !== item.id || updated.status !== status || typeof updated.updatedAt !== "string") {
+        throw new Error("The return update response was invalid.");
+      }
+      const next = { ...item, status, updatedAt: updated.updatedAt };
+      setItems(previous => previous.map(current => current.id === item.id ? next : current));
+      setDetail(current => current?.id === item.id ? next : current);
+    } catch (updateError) {
+      console.error("Failed to update admin return request:", updateError);
+      setActionError(updateError instanceof Error ? updateError.message : "Could not update this return request.");
+    } finally {
+      setUpdatingId(null);
+    }
+  }
 
   return (
     <div className="space-y-5">
-      <PageHeader breadcrumb="Orders / Return" title="Return Requests"
-        subtitle="Manage product returns, refunds and replacements" count={items.length}/>
+      <PageHeader breadcrumb="Orders / Returns" title="Return Requests"
+        subtitle="Review customer return requests, approve or reject them, and track refunds"
+        count={items.length}>
+        <button type="button" onClick={() => void loadReturns()}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </PageHeader>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Returns"   val={items.length}                  color={G}        icon={RotateCcw}    />
-        <StatCard label="Pending Action"  val={pending}                       color="#f59e0b"  icon={Clock}        />
-        <StatCard label="Refunded"        val={`₹${(refunded/1000).toFixed(1)}k`} color="#009966" icon={IndianRupee}/>
-        <StatCard label="Resolved"        val={items.filter(r => r.resolvedOn).length} color="#8b5cf6" icon={CheckCircle2}/>
+      {error && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{error}</span>
+          <button type="button" onClick={() => void loadReturns()} className="font-bold underline">Retry</button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="Total Returns" val={items.length} color={G} icon={RotateCcw} />
+        <StatCard label="Awaiting Review" val={counts.requested} color="#f59e0b" icon={Clock} />
+        <StatCard label="Refunded Total" val={fmt(counts.refunded)} color="#009966" icon={IndianRupee} />
+        <StatCard label="Resolved" val={counts.resolved} color="#8b5cf6" icon={CheckCircle2} />
       </div>
 
-      {/* Reason breakdown */}
       <SectionCard>
-        <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-3">Return Reasons</p>
-        <div className="space-y-2">
-          {REASONS.slice(0, 5).map(reason => {
-            const cnt = items.filter(r => r.reason === reason).length;
-            const pct = Math.round((cnt / items.length) * 100);
-            return (
-              <div key={reason} className="flex items-center gap-3">
-                <p className="text-xs text-gray-600 w-48 shrink-0 truncate">{reason}</p>
-                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <p className="mb-3 text-[10px] font-black uppercase tracking-wider text-gray-400">Most common customer reasons</p>
+        {reasonBreakdown.length ? (
+          <div className="space-y-2">
+            {reasonBreakdown.map(([reason, count]) => (
+              <div key={reason} className="flex min-w-0 items-center gap-3">
+                <p className="w-48 shrink-0 truncate text-xs text-gray-600">{reason}</p>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
                   <motion.div className="h-full rounded-full" style={{ background: G }}
-                    initial={{ width: 0 }} animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.7, ease: "easeOut" }}/>
+                    initial={{ width: 0 }}
+                    animate={{ width: `${items.length ? Math.round(count / items.length * 100) : 0}%` }}
+                    transition={{ duration: 0.5 }} />
                 </div>
-                <span className="text-[10px] font-black text-gray-500 w-6 text-right">{cnt}</span>
+                <span className="w-6 text-right text-[10px] font-black text-gray-500">{count}</span>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : <p className="text-xs text-gray-400">No return reasons yet.</p>}
       </SectionCard>
 
-      {/* Status filter tabs */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchBar value={q} onChange={setQ} placeholder="Search request, order, customer or product…" />
+        <span className="text-xs text-gray-400">{filtered.length} request{filtered.length === 1 ? "" : "s"}</span>
+      </div>
+
       <div className="flex flex-wrap gap-2">
-        {(["All", ...ALL_STATUSES] as const).map(s => {
-          const cnt = s === "All" ? items.length : counts[s];
-          const m   = s !== "All" ? STATUS_META[s] : null;
+        {STATUS_FILTERS.map(status => {
+          const count = status === "all" ? items.length : items.filter(item => item.status === status).length;
+          const meta = status === "all" ? null : STATUS_META[status];
           return (
-            <button key={s} onClick={() => setStatusF(s)}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
-              style={statusF === s
-                ? { background: m ? m.color : G, color: "#fff" }
-                : { background: m ? m.bg : "#f3f4f6", color: m ? m.color : "#6b7280" }}>
-              {s} ({cnt})
+            <button type="button" key={status} onClick={() => setStatusFilter(status)}
+              className="rounded-xl px-3 py-2 text-xs font-bold transition"
+              style={statusFilter === status
+                ? { background: meta?.color ?? G, color: "#fff" }
+                : { background: meta?.bg ?? "#f3f4f6", color: meta?.color ?? "#6b7280" }}>
+              {status === "all" ? "All" : meta?.label} ({count})
             </button>
           );
         })}
       </div>
 
-      {/* Return cards grid */}
-      <div className="flex items-center gap-2 mb-1">
-        <SearchBar value={q} onChange={setQ} placeholder="Search by return ID, customer or product…"/>
-        <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} return{filtered.length !== 1 ? "s" : ""}</span>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {filtered.map(r => {
-          const sm = STATUS_META[r.status];
-          const SI = sm.icon;
-          return (
-            <motion.div key={r.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-2xl border border-gray-200 p-4 hover:shadow-md transition-all group">
-              {/* Top row */}
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-gray-50 border border-gray-100 shrink-0">
-                    {emojiFor(r.customer)}
+      {loading && items.length === 0 ? (
+        <div className="rounded-2xl border border-gray-200 bg-white py-16 text-center text-sm text-gray-400">Loading return requests…</div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {filtered.map(item => {
+            const meta = STATUS_META[item.status];
+            const StatusIcon = meta.icon;
+            const actions = STATUS_OPTIONS[item.status];
+            return (
+              <motion.article key={item.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl border border-gray-200 bg-white p-4 transition hover:shadow-md">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-black text-gray-900">{item.customer}</p>
+                    <p className="mt-1 break-all text-[10px] text-gray-400">
+                      Return #{item.id} · Order {item.orderId}
+                    </p>
                   </div>
-                  <div>
-                    <p className="text-xs font-black text-gray-900">{r.customer}</p>
-                    <p className="text-[10px] text-gray-400">{r.id} · Order {r.orderId}</p>
-                  </div>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold"
+                    style={{ color: meta.color, background: meta.bg }}>
+                    <StatusIcon size={11} /> {meta.label}
+                  </span>
                 </div>
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg shrink-0" style={{ color: sm.color, background: sm.bg }}>
-                  <SI size={10}/> {sm.label}
-                </span>
-              </div>
-
-              {/* Product info */}
-              <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-gray-50 border border-gray-100 mb-3">
-                <div className="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center shrink-0">
-                  <Package size={14} className="text-gray-400"/>
+                <div className="mb-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <p className="text-xs font-bold text-gray-800">
+                    {item.products.map(product => product.product).join(", ") || "Order items"}
+                  </p>
+                  <p className="mt-1 text-[10px] text-gray-500">
+                    {item.products.map(product => `Qty ${product.quantity}`).join(" · ") || "Quantity unavailable"}
+                    {" · "}{fmt(item.amount)}
+                  </p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-bold text-gray-800 truncate">{r.product}</p>
-                  <p className="text-[10px] text-gray-400">Qty: {r.qty} · {fmt(r.amount)}</p>
+                <p className="mb-3 line-clamp-3 text-xs text-gray-600">
+                  <span className="font-bold text-gray-800">Reason: </span>{item.reason || "No reason provided"}
+                </p>
+                <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-400">
+                  <span>Requested: {formatDate(item.requestedAt)}</span>
+                  {item.updatedAt !== item.requestedAt && <span>Updated: {formatDate(item.updatedAt)}</span>}
                 </div>
-              </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+                  {actions.includes("approved") && (
+                    <button type="button" disabled={updatingId === item.id}
+                      onClick={() => void updateStatus(item, "approved")}
+                      className="rounded-xl px-3 py-2 text-[11px] font-black text-white disabled:opacity-50"
+                      style={{ background: G }}>Approve</button>
+                  )}
+                  {actions.includes("rejected") && (
+                    <button type="button" disabled={updatingId === item.id}
+                      onClick={() => void updateStatus(item, "rejected")}
+                      className="rounded-xl bg-red-500 px-3 py-2 text-[11px] font-black text-white disabled:opacity-50">Reject</button>
+                  )}
+                  {actions.includes("received") && (
+                    <button type="button" disabled={updatingId === item.id}
+                      onClick={() => void updateStatus(item, "received")}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-[11px] font-black text-white disabled:opacity-50">
+                      <Truck size={12} /> Mark item received</button>
+                  )}
+                  {actions.includes("refunded") && (
+                    <button type="button" disabled={updatingId === item.id}
+                      onClick={() => void updateStatus(item, "refunded")}
+                      className="rounded-xl px-3 py-2 text-[11px] font-black text-white disabled:opacity-50"
+                      style={{ background: G }}>Mark refunded</button>
+                  )}
+                  <button type="button" onClick={() => { setDetail(item); setActionError(""); }}
+                    className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:border-blue-200 hover:text-blue-600"
+                    aria-label={`View return request ${item.id}`}>
+                    <Eye size={13} />
+                  </button>
+                </div>
+              </motion.article>
+            );
+          })}
+          {!filtered.length && (
+            <div className="col-span-full flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 py-16 text-gray-400">
+              <Search size={25} />
+              <p className="text-sm font-bold">{items.length ? "No return requests match your filters" : "No return requests yet"}</p>
+            </div>
+          )}
+        </div>
+      )}
 
-              {/* Reason */}
-              <p className="text-[10px] text-gray-500 mb-3 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: sm.color }}/>
-                {r.reason}
-              </p>
-
-              {/* Dates + refund mode */}
-              <div className="flex items-center gap-3 text-[10px] text-gray-400 mb-3">
-                <span>Requested: {r.requestedOn}</span>
-                {r.resolvedOn && <span>· Resolved: {r.resolvedOn}</span>}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                {r.status === "Requested" && (
-                  <>
-                    <button onClick={() => updateStatus(r.id, "Approved")}
-                      className="flex-1 py-2 rounded-xl text-[11px] font-black text-white transition-all" style={{ background: G }}>
-                      Approve
-                    </button>
-                    <button onClick={() => updateStatus(r.id, "Rejected")}
-                      className="flex-1 py-2 rounded-xl text-[11px] font-black text-white bg-red-500 transition-all">
-                      Reject
-                    </button>
-                  </>
-                )}
-                {r.status === "Approved" && (
-                  <>
-                    <button onClick={() => updateStatus(r.id, "Refunded")}
-                      className="flex-1 py-2 rounded-xl text-[11px] font-black text-white transition-all" style={{ background: G }}>
-                      Mark Refunded
-                    </button>
-                    <button onClick={() => updateStatus(r.id, "Replaced")}
-                      className="flex-1 py-2 rounded-xl text-[11px] font-black border border-purple-200 text-purple-600 hover:bg-purple-50 transition-all">
-                      Mark Replaced
-                    </button>
-                  </>
-                )}
-                {["Rejected","Refunded","Replaced"].includes(r.status) && (
-                  <span className="flex-1 text-center text-[10px] text-gray-400">Resolved</span>
-                )}
-                <button onClick={() => setDetail(r)} className="w-8 h-8 rounded-xl flex items-center justify-center border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-200 transition-all">
-                  <Eye size={13}/>
-                </button>
-              </div>
-            </motion.div>
-          );
-        })}
-
-        {filtered.length === 0 && (
-          <div className="col-span-2 py-16 flex flex-col items-center justify-center gap-2 text-gray-400 border border-dashed border-gray-200 rounded-2xl">
-            <RotateCcw size={28}/>
-            <p className="text-sm font-bold">No return requests match your filters</p>
-          </div>
-        )}
-      </div>
-
-      {/* Detail modal */}
-      <Modal open={detail !== null} onClose={() => setDetail(null)} title={`Return Details · ${detail?.id}`}>
+      <Modal open={detail !== null} onClose={() => { setDetail(null); setActionError(""); }}
+        title={`Return Request · ${detail ? `#${detail.id}` : ""}`} wide>
         {detail && (
           <div className="space-y-4">
-            {/* Status + update */}
-            <div className="flex items-center gap-3">
-              {(() => { const sm = STATUS_META[detail.status]; const SI = sm.icon; return (
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl" style={{ color: sm.color, background: sm.bg }}>
-                  <SI size={12}/> {sm.label}
-                </span>
-              ); })()}
-              <select value={detail.status} onChange={e => updateStatus(detail.id, e.target.value as ReturnStatus)} className={`${inp} flex-1`}>
-                {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
-              </select>
+            {actionError && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{actionError}</p>}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold"
+                style={{ color: STATUS_META[detail.status].color, background: STATUS_META[detail.status].bg }}>
+                {STATUS_META[detail.status].label}
+              </span>
+              <span className="text-xs font-bold text-gray-600">Order {detail.orderId}</span>
             </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Customer</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-gray-200 p-3 text-xs">
+                <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">Customer</p>
                 <p className="font-bold text-gray-800">{detail.customer}</p>
-                <p className="text-gray-400">{detail.orderId}</p>
+                {detail.email && <p className="mt-1 break-all text-gray-500">{detail.email}</p>}
+                {detail.phone && <p className="mt-1 text-gray-500">{detail.phone}</p>}
               </div>
-              <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Refund</p>
-                <p className="font-black text-gray-800" style={{ color: G }}>{fmt(detail.amount)}</p>
-                <p className="text-gray-400 capitalize">{detail.refundMode === "original" ? "To original method" : detail.refundMode === "wallet" ? "To wallet" : "Replacement"}</p>
+              <div className="rounded-xl border border-gray-200 p-3 text-xs">
+                <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">Order payment</p>
+                <p className="font-black" style={{ color: G }}>{fmt(detail.amount)}</p>
+                <p className="mt-1 capitalize text-gray-500">
+                  {detail.paymentMethod.replace(/[_-]+/g, " ")} · {detail.paymentStatus.replace(/[_-]+/g, " ")}
+                </p>
               </div>
             </div>
-
             <div className="rounded-xl border border-gray-200 p-3">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Product</p>
-              <p className="text-sm font-bold text-gray-800">{detail.product}</p>
-              <p className="text-xs text-gray-400 mt-0.5">Qty: {detail.qty}</p>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-gray-400">Returned items</p>
+              <div className="space-y-2">
+                {detail.products.map((product, index) => (
+                  <div key={`${product.product}-${index}`} className="flex items-start justify-between gap-3 text-xs">
+                    <span className="font-semibold text-gray-800">
+                      {product.product}{product.variant ? ` · ${product.variant}` : ""}
+                    </span>
+                    <span className="shrink-0 text-gray-500">Qty {product.quantity}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-
             <div className="rounded-xl border border-gray-200 p-3">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Return Reason</p>
-              <p className="text-sm text-gray-700">{detail.reason}</p>
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400">Customer reason</p>
+              <p className="whitespace-pre-wrap text-sm text-gray-700">{detail.reason || "No reason provided"}</p>
             </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              {detail.status === "Requested" && <>
-                <button onClick={() => { updateStatus(detail.id, "Approved"); setDetail(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white" style={{ background: G }}>Approve Return</button>
-                <button onClick={() => { updateStatus(detail.id, "Rejected"); setDetail(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white bg-red-500">Reject</button>
-              </>}
-              {detail.status === "Approved" && <>
-                <button onClick={() => { updateStatus(detail.id, "Refunded"); setDetail(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-black text-white" style={{ background: G }}>Mark Refunded</button>
-                <button onClick={() => { updateStatus(detail.id, "Replaced"); setDetail(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-black border border-purple-200 text-purple-600">Mark Replaced</button>
-              </>}
-              {["Rejected","Refunded","Replaced"].includes(detail.status) && (
-                <button onClick={() => setDetail(null)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-gray-200 text-gray-600">Close</button>
-              )}
+            <div className="grid grid-cols-1 gap-2 text-[11px] text-gray-500 sm:grid-cols-2">
+              <p>Requested: {formatDate(detail.requestedAt)}</p>
+              <p>Last updated: {formatDate(detail.updatedAt)}</p>
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3">
+              {STATUS_OPTIONS[detail.status].map(status => (
+                <button key={status} type="button" disabled={updatingId === detail.id}
+                  onClick={() => void updateStatus(detail, status)}
+                  className="rounded-xl px-4 py-2.5 text-xs font-black text-white transition disabled:cursor-wait disabled:opacity-50"
+                  style={{ background: status === "rejected" || status === "cancelled" ? "#ef4444" : G }}>
+                  {updatingId === detail.id ? "Updating…" : `Mark ${STATUS_META[status].label.toLowerCase()}`}
+                </button>
+              ))}
             </div>
           </div>
         )}

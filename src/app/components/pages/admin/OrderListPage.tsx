@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ListOrdered, Clock, PackageCheck, Package, Truck,
@@ -26,15 +26,75 @@ type Order = {
   phone: string;
   email: string;
   items: number;
+  subtotal: number;
+  taxAmount: number;
+  shippingAmount: number;
   amount: number;
+  paymentMethod: string;
+  paymentStatus: string;
   status: OrderStatus;
   city: string;
   address: string;
   pincode: string;
-  time: string;
-  date: string;
+  createdAt: string;
+  updatedAt: string;
   products: string[];
+  statusHistory: { status: OrderStatus; changedAt: string }[];
 };
+
+function isOrderStatus(value: unknown): value is OrderStatus {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(STATUS_META, value);
+}
+
+function isOrder(value: unknown): value is Order {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const order = value as Record<string, unknown>;
+  return typeof order.id === "string" &&
+    typeof order.customer === "string" &&
+    typeof order.phone === "string" &&
+    typeof order.email === "string" &&
+    typeof order.items === "number" &&
+    typeof order.subtotal === "number" &&
+    typeof order.taxAmount === "number" &&
+    typeof order.shippingAmount === "number" &&
+    typeof order.amount === "number" &&
+    typeof order.paymentMethod === "string" &&
+    typeof order.paymentStatus === "string" &&
+    isOrderStatus(order.status) &&
+    typeof order.city === "string" &&
+    typeof order.address === "string" &&
+    typeof order.pincode === "string" &&
+    typeof order.createdAt === "string" &&
+    typeof order.updatedAt === "string" &&
+    Array.isArray(order.products) &&
+    order.products.every(product => typeof product === "string") &&
+    Array.isArray(order.statusHistory) &&
+    order.statusHistory.every(event =>
+      Boolean(event) &&
+      typeof event === "object" &&
+      isOrderStatus((event as Record<string, unknown>).status) &&
+      typeof (event as Record<string, unknown>).changedAt === "string"
+    );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : "Date unavailable";
+}
+
+function formatTime(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase()
+    : "";
+}
+
+function formatDateTime(value: string) {
+  const time = formatTime(value);
+  return `${time ? `${time} · ` : ""}${formatDate(value)}`;
+}
 
 // ─── Status meta ─────────────────────────────────────────────────────────────
 
@@ -59,41 +119,6 @@ const SIDE_NAV: { id: string; label: string; status: OrderStatus | null; icon: R
   { id: "cancelled",     label: "Cancelled Order",  status: "Cancelled",       icon: XCircle,      color: "#ef4444" },
 ];
 
-// ─── Sample data ──────────────────────────────────────────────────────────────
-
-const INIT_ORDERS: Order[] = [
-  { id: "BB-29041", customer: "Arjun Mehta",      phone: "9876543210", email: "arjun@email.com",   items: 3, amount: 1840,  status: "Delivered",        city: "Mumbai",    address: "12 Marine Lines, Churchgate",       pincode: "400020", time: "9:14 am",  date: "5 Sep 2026", products: ["Basmati Rice 5kg", "Dosa Mix", "Coconut Oil"]          },
-  { id: "BB-29042", customer: "Priya Singh",       phone: "9823456789", email: "priya@email.com",   items: 1, amount: 2499,  status: "Shipped",          city: "Delhi",     address: "45 Connaught Place, New Delhi",     pincode: "110001", time: "9:32 am",  date: "5 Sep 2026", products: ["OnePlus Earbuds Pro"]                                  },
-  { id: "BB-29043", customer: "Rahul Nair",        phone: "9988776655", email: "rahul@email.com",   items: 5, amount: 890,   status: "Processed",        city: "Bengaluru", address: "88 Koramangala 5th Block",          pincode: "560034", time: "10:02 am", date: "5 Sep 2026", products: ["Turmeric", "Coriander", "Chilli", "Jeera", "Atta"]    },
-  { id: "BB-29044", customer: "Sneha Reddy",       phone: "9712345678", email: "sneha@email.com",   items: 2, amount: 3200,  status: "Pending",          city: "Hyderabad", address: "23 Jubilee Hills",                  pincode: "500033", time: "10:18 am", date: "5 Sep 2026", products: ["Mixer Grinder 750W", "Knife Set"]                      },
-  { id: "BB-29045", customer: "Vikash Gupta",      phone: "9823111222", email: "vikash@email.com",  items: 4, amount: 560,   status: "Delivered",        city: "Pune",      address: "7 Koregaon Park",                   pincode: "411001", time: "10:45 am", date: "5 Sep 2026", products: ["Mango Pickle", "Lemon Pickle", "Mixed Veg", "Amla"]   },
-  { id: "BB-29046", customer: "Meera Iyer",        phone: "9900112233", email: "meera@email.com",   items: 1, amount: 12499, status: "Out For Delivery", city: "Chennai",   address: "56 Anna Nagar",                     pincode: "600040", time: "11:07 am", date: "5 Sep 2026", products: ["Samsung Galaxy Tab S8"]                                },
-  { id: "BB-29047", customer: "Sunil Krishnan",    phone: "9876001122", email: "sunil@email.com",   items: 6, amount: 780,   status: "Cancelled",        city: "Kolkata",   address: "33 Park Street",                    pincode: "700016", time: "11:22 am", date: "5 Sep 2026", products: ["Assam Tea", "Darjeeling Tea", "Green Tea", "Honey", "Jam", "Bread"] },
-  { id: "BB-29048", customer: "Kavya Menon",       phone: "9845678901", email: "kavya@email.com",   items: 2, amount: 1450,  status: "Received",         city: "Kochi",     address: "8 MG Road, Ernakulam",              pincode: "682011", time: "11:55 am", date: "5 Sep 2026", products: ["Kurti Set", "Dupatta"]                                 },
-  { id: "BB-29049", customer: "Ankit Sharma",      phone: "9751234567", email: "ankit@email.com",   items: 3, amount: 2100,  status: "Delivered",        city: "Jaipur",    address: "14 Civil Lines",                    pincode: "302006", time: "12:10 pm", date: "5 Sep 2026", products: ["Rajasthani Bedsheet", "Pillow Cover", "Curtain"]       },
-  { id: "BB-29050", customer: "Deepa Pillai",      phone: "9632587410", email: "deepa@email.com",   items: 1, amount: 4999,  status: "Processed",        city: "Mumbai",    address: "90 Linking Road, Bandra West",      pincode: "400050", time: "12:40 pm", date: "5 Sep 2026", products: ["Prestige Cooker 5L"]                                   },
-  { id: "BB-29051", customer: "Ravi Shankar",      phone: "9786541230", email: "ravi@email.com",    items: 8, amount: 1220,  status: "Shipped",          city: "Delhi",     address: "22 Lajpat Nagar",                   pincode: "110024", time: "1:05 pm",  date: "5 Sep 2026", products: ["Spice Box Set", "Mortar & Pestle", "Tawa", "Kadai", "Ladle", "Spatula", "Peeler", "Chakla"] },
-  { id: "BB-29052", customer: "Pooja Desai",       phone: "9812309876", email: "pooja@email.com",   items: 2, amount: 870,   status: "Pending",          city: "Ahmedabad", address: "5 Ashram Road",                     pincode: "380009", time: "1:28 pm",  date: "5 Sep 2026", products: ["Jaggery 2kg", "Groundnut Oil 2L"]                      },
-  { id: "BB-29053", customer: "Karan Malhotra",    phone: "9741236547", email: "karan@email.com",   items: 3, amount: 1490,  status: "Shipped",          city: "Bengaluru", address: "11 Indiranagar 100ft Road",         pincode: "560038", time: "2:10 pm",  date: "5 Sep 2026", products: ["Wheat Flour 10kg", "Rice 5kg", "Dal 2kg"]             },
-  { id: "BB-29054", customer: "Neha Kapoor",       phone: "9654321098", email: "neha@email.com",    items: 2, amount: 3400,  status: "Out For Delivery", city: "Mumbai",    address: "67 Worli Sea Face",                 pincode: "400018", time: "2:30 pm",  date: "5 Sep 2026", products: ["Air Fryer 4L", "Silicon Spatula Set"]                 },
-  { id: "BB-29055", customer: "Sanjay Verma",      phone: "9908765432", email: "sanjay@email.com",  items: 1, amount: 8999,  status: "Received",         city: "Noida",     address: "Sector 62, Block C",                pincode: "201309", time: "3:00 pm",  date: "5 Sep 2026", products: ["Philips Air Fryer XL"]                                 },
-  { id: "BB-29056", customer: "Lakshmi Rao",       phone: "9876123456", email: "lakshmi@email.com", items: 4, amount: 650,   status: "Delivered",        city: "Visakhapatnam", address: "Dwaraka Nagar, 3rd Lane",       pincode: "530016", time: "3:20 pm",  date: "5 Sep 2026", products: ["Neem Soap 6-pack", "Coconut Shampoo", "Aloe Gel", "Face Wash"] },
-  { id: "BB-29057", customer: "Harish Nambiar",    phone: "9843215678", email: "harish@email.com",  items: 2, amount: 5400,  status: "Processed",        city: "Thiruvananthapuram", address: "Kowdiar, Medical College Road", pincode: "695003", time: "3:45 pm",  date: "5 Sep 2026", products: ["Smart Watch Series 8", "Charging Cable"]             },
-  { id: "BB-29058", customer: "Geeta Sharma",      phone: "9765432100", email: "geeta@email.com",   items: 7, amount: 1120,  status: "Pending",          city: "Chandigarh","address": "Sector 17, Market Road",         pincode: "160017", time: "4:00 pm",  date: "5 Sep 2026", products: ["Pulao Rice", "Chana Dal", "Rajma", "Moong Dal", "Masoor", "Urad Dal", "Arhar Dal"] },
-  { id: "BB-29059", customer: "Ritu Agarwal",      phone: "9812987654", email: "ritu@email.com",    items: 3, amount: 2800,  status: "Out For Delivery", city: "Lucknow",   address: "Gomti Nagar, Sector A",             pincode: "226010", time: "4:15 pm",  date: "5 Sep 2026", products: ["Cotton Saree", "Blouse Fabric", "Petticoat"]          },
-  { id: "BB-29060", customer: "Mohan Das",         phone: "9900871234", email: "mohan@email.com",   items: 1, amount: 15999, status: "Received",         city: "Bhopal",    address: "MP Nagar Zone 1",                   pincode: "462011", time: "4:40 pm",  date: "5 Sep 2026", products: ["iPhone 15 Case Bundle"]                               },
-  { id: "BB-29061", customer: "Divya Nair",        phone: "9856321470", email: "divya@email.com",   items: 5, amount: 980,   status: "Shipped",          city: "Kochi",     address: "Panampilly Nagar",                  pincode: "682036", time: "5:00 pm",  date: "5 Sep 2026", products: ["Spice Set", "Masala Box", "Pepper", "Cardamom", "Bay Leaf"] },
-  { id: "BB-29062", customer: "Arun Pillai",       phone: "9741200987", email: "arun@email.com",    items: 2, amount: 4200,  status: "Cancelled",        city: "Coimbatore","address": "RS Puram, 2nd Cross",             pincode: "641002", time: "5:20 pm",  date: "5 Sep 2026", products: ["Electric Kettle", "Tea Strainer"]                     },
-  { id: "BB-29063", customer: "Sunita Joshi",      phone: "9823654100", email: "sunita@email.com",  items: 3, amount: 1700,  status: "Delivered",        city: "Indore",    address: "Vijay Nagar, South Avenue",         pincode: "452010", time: "5:50 pm",  date: "5 Sep 2026", products: ["Kurti Pack 3", "Leggings 2-pack", "Dupatta"]          },
-  { id: "BB-29064", customer: "Tarun Mehta",       phone: "9965432876", email: "tarun@email.com",   items: 1, amount: 6999,  status: "Processed",        city: "Surat",     address: "Citylight Road, Adajan",            pincode: "395009", time: "6:10 pm",  date: "5 Sep 2026", products: ["Instant Pot 6L Duo"]                                  },
-  { id: "BB-29065", customer: "Pallavi Krishnan",  phone: "9876540023", email: "pallavi@email.com", items: 4, amount: 3100,  status: "Out For Delivery", city: "Nagpur",    address: "Dharampeth, Central Avenue",        pincode: "440010", time: "6:30 pm",  date: "5 Sep 2026", products: ["Bedsheet King", "Pillow Set 2", "Blanket", "Cushion"] },
-  { id: "BB-29066", customer: "Vinod Kumar",       phone: "9741320098", email: "vinod@email.com",   items: 2, amount: 750,   status: "Cancelled",        city: "Patna",     address: "Boring Road, Patna",                pincode: "800001", time: "7:00 pm",  date: "5 Sep 2026", products: ["Glucose Biscuits 5-pack", "Namkeen Mix"]              },
-  { id: "BB-29067", customer: "Rekha Menon",       phone: "9876002134", email: "rekha@email.com",   items: 6, amount: 2400,  status: "Received",         city: "Thrissur",  address: "Round South, Thrissur",             pincode: "680001", time: "7:20 pm",  date: "5 Sep 2026", products: ["Tamarind 1kg", "Kokum", "Curry Leaves", "Drumstick", "Raw Mango", "Jackfruit Chips"] },
-  { id: "BB-29068", customer: "Suresh Babu",       phone: "9654009871", email: "suresh@email.com",  items: 1, amount: 22999, status: "Pending",          city: "Hyderabad", address: "Banjara Hills, Road No 10",         pincode: "500034", time: "7:45 pm",  date: "5 Sep 2026", products: ["DSLR Camera Lens 50mm"]                               },
-  { id: "BB-29069", customer: "Anjali Gupta",      phone: "9876543001", email: "anjali@email.com",  items: 3, amount: 1900,  status: "Shipped",          city: "Agra",      address: "Kamla Nagar, MG Road",              pincode: "282002", time: "8:00 pm",  date: "5 Sep 2026", products: ["Leather Wallet", "Belt", "Sunglasses"]                },
-  { id: "BB-29070", customer: "Prakash Rao",       phone: "9712000765", email: "prakash@email.com", items: 2, amount: 500,   status: "Delivered",        city: "Mysuru",    address: "VV Mohalla, Ashoka Road",           pincode: "570002", time: "8:30 pm",  date: "5 Sep 2026", products: ["Agarbatti Premium", "Camphor Pack"]                   },
-];
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const initials = (name: string) => name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -112,45 +137,140 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function OrderListPage() {
-  const [orders, setOrders]   = useState(INIT_ORDERS);
+  const [orders, setOrders]   = useState<Order[]>([]);
   const [activeTab, setActiveTab] = useState("all");
   const [q, setQ]             = useState("");
   const [detail, setDetail]   = useState<Order | null>(null);
   const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const loadOrders = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/orders", {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string"
+          ? result.message : "Could not load orders.";
+        throw new Error(message);
+      }
+
+      const payload = result as Record<string, unknown>;
+      if (payload.success !== true || !Array.isArray(payload.orders) ||
+          !payload.orders.every(isOrder)) {
+        throw new Error("The orders response was invalid. Please try again.");
+      }
+      setOrders(payload.orders);
+    } catch (loadError) {
+      if (!(loadError instanceof Error && loadError.name === "AbortError")) {
+        console.error("Failed to load admin orders:", loadError);
+        setError(loadError instanceof Error ? loadError.message : "Could not load orders.");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadOrders(controller.signal);
+    return () => controller.abort();
+  }, [loadOrders]);
 
   const navItem     = SIDE_NAV.find(n => n.id === activeTab)!;
   const countOf     = (status: OrderStatus | null) => status ? orders.filter(o => o.status === status).length : orders.length;
 
-  const displayed = orders.filter(o => {
+  const displayed = useMemo(() => orders.filter(o => {
     const statusOk = !navItem.status || o.status === navItem.status;
     const qOk      = !q || o.id.toLowerCase().includes(q.toLowerCase()) || o.customer.toLowerCase().includes(q.toLowerCase()) || o.city.toLowerCase().includes(q.toLowerCase());
     return statusOk && qOk;
-  });
+  }), [navItem.status, orders, q]);
 
-  const updateStatus = (id: string, status: OrderStatus) => {
-    setOrders(p => p.map(o => o.id === id ? { ...o, status } : o));
-    if (detail?.id === id) setDetail(d => d ? { ...d, status } : d);
+  const updateStatus = async (id: string, status: OrderStatus) => {
+    setUpdatingOrderId(id);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/orders", {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderNumber: id, status }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("order" in result) || !result.order || typeof result.order !== "object" ||
+          !("status" in result.order) || !isOrderStatus(result.order.status) ||
+          !("changedAt" in result.order) || typeof result.order.changedAt !== "string") {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string"
+          ? result.message : "Could not update order status.";
+        throw new Error(message);
+      }
+
+      const changedAt = result.order.changedAt;
+      const current = orders.find(order => order.id === id);
+      const statusHistory = current && current.status !== status
+        ? [...current.statusHistory, { status, changedAt }]
+        : current?.statusHistory ?? [];
+      const updatedAt = current && current.status !== status ? changedAt : current?.updatedAt ?? changedAt;
+      setOrders(previous => previous.map(order => order.id === id
+        ? { ...order, status, statusHistory, updatedAt }
+        : order));
+      setDetail(previous => previous?.id === id
+        ? { ...previous, status, statusHistory, updatedAt }
+        : previous);
+    } catch (updateError) {
+      console.error("Failed to update order status:", updateError);
+      setError(updateError instanceof Error ? updateError.message : "Could not update order status.");
+    } finally {
+      setUpdatingOrderId(null);
+    }
   };
 
   const totalRevenue = displayed.reduce((s, o) => s + o.amount, 0);
+  const exportOrders = () => {
+    const fields = ["Order ID", "Customer", "Phone", "Email", "Amount", "Items", "Status", "City", "Address", "Pincode", "Created At"];
+    const csvValue = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const rows = displayed.map(order => [
+      order.id, order.customer, order.phone, order.email, order.amount, order.items,
+      order.status, order.city, order.address, order.pincode, order.createdAt,
+    ]);
+    const csv = [fields, ...rows].map(row => row.map(csvValue).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "bharat-bazar-orders.csv";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-120px)] -m-4 md:-m-5 overflow-hidden">
 
       {/* ── MOBILE HORIZONTAL NAV ── */}
-      <div className="md:hidden bg-white border-b border-gray-200 overflow-x-auto flex shrink-0"
-        style={{ scrollbarWidth: "none" }}>
+      <div className="md:hidden grid shrink-0 grid-cols-4 border-b border-gray-200 bg-white">
         {SIDE_NAV.map(nav => {
           const Icon = nav.icon;
           const isActive = activeTab === nav.id;
           const short = nav.id === "all" ? "All" : nav.id === "out-delivery" ? "Delivery" : (nav.status ?? "All");
           return (
             <button key={nav.id} onClick={() => { setActiveTab(nav.id); setQ(""); }}
-              className="flex flex-col items-center gap-1 px-3 py-2.5 shrink-0 border-b-2 transition-all"
+              className="flex min-w-0 flex-col items-center gap-1 border-b-2 px-1 py-2.5 transition-all"
               style={{ borderBottomColor: isActive ? nav.color : "transparent",
                        color: isActive ? nav.color : "#6b7280" }}>
               <Icon size={15}/>
-              <span className="text-[9px] font-bold whitespace-nowrap">{short}</span>
+              <span className="max-w-full truncate text-[9px] font-bold">{short}</span>
             </button>
           );
         })}
@@ -229,7 +349,7 @@ export function OrderListPage() {
       </motion.div>
 
       {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 p-4 md:p-5 space-y-4 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 p-3 sm:p-4 md:p-5 space-y-4 overflow-y-auto overflow-x-hidden">
 
         {/* Page title */}
         <AnimatePresence mode="wait">
@@ -248,16 +368,24 @@ export function OrderListPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all">
+                <button type="button" onClick={exportOrders} disabled={loading || displayed.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all disabled:cursor-not-allowed disabled:opacity-50">
                   <Download size={12}/> Export
                 </button>
-                <button className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white" style={{ background: navItem.color }}>
-                  <RefreshCw size={12}/> Refresh
+                <button type="button" onClick={() => void loadOrders()} disabled={loading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60" style={{ background: navItem.color }}>
+                  <RefreshCw size={12} className={loading ? "animate-spin" : ""}/> Refresh
                 </button>
               </div>
             </div>
           </motion.div>
         </AnimatePresence>
+
+        {error && (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+            {error}
+          </div>
+        )}
 
         {/* Stat cards */}
         <AnimatePresence mode="wait">
@@ -292,13 +420,27 @@ export function OrderListPage() {
           <motion.div key={`table-${activeTab}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            {displayed.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px]">
+            {loading ? (
+              <div role="status" className="px-4 py-12 text-center text-xs font-semibold text-gray-400">
+                Loading orders from the database…
+              </div>
+            ) : displayed.length > 0 ? (
+              <>
+              <div className="hidden 2xl:block w-full">
+                <table className="w-full table-fixed">
                   <thead>
                     <tr style={{ background: "#fafafa", borderBottom: "1px solid #f3f4f6" }}>
-                      {["Order ID","Customer","Amount","Items","City","Status","Date",""].map(h => (
-                        <th key={h} className="text-left text-[9px] font-black text-gray-400 uppercase tracking-wider px-4 py-3 first:rounded-tl-2xl whitespace-nowrap">{h}</th>
+                      {[
+                        ["Order ID", "w-[15%]"],
+                        ["Customer", "w-[19%]"],
+                        ["Amount", "w-[11%]"],
+                        ["Items", "w-[7%]"],
+                        ["City", "w-[11%]"],
+                        ["Status", "w-[15%]"],
+                        ["Date", "w-[15%]"],
+                        ["", "w-[7%]"],
+                      ].map(([h, width]) => (
+                        <th key={h} className={`${width} text-left text-[9px] font-black text-gray-400 uppercase tracking-wider px-3 py-3 first:rounded-tl-2xl`}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -311,7 +453,7 @@ export function OrderListPage() {
                           className="group hover:bg-gray-50/60 transition-colors">
                           {/* Order ID */}
                           <td className="px-4 py-3">
-                            <span className="text-[11px] font-mono font-bold text-gray-400">#{o.id}</span>
+                            <span className="block truncate text-[11px] font-mono font-bold text-gray-400" title={`#${o.id}`}>#{o.id}</span>
                           </td>
                           {/* Customer */}
                           <td className="px-4 py-3">
@@ -321,8 +463,8 @@ export function OrderListPage() {
                                 {initials(o.customer)}
                               </div>
                               <div>
-                                <p className="text-xs font-bold text-gray-800 whitespace-nowrap">{o.customer}</p>
-                                <p className="text-[9px] text-gray-400">{o.phone}</p>
+                                <p className="truncate text-xs font-bold text-gray-800" title={o.customer}>{o.customer}</p>
+                                <p className="truncate text-[9px] text-gray-400">{o.phone}</p>
                               </div>
                             </div>
                           </td>
@@ -354,7 +496,7 @@ export function OrderListPage() {
                                   const m2 = STATUS_META[st];
                                   const I2 = m2.icon;
                                   return (
-                                    <button key={st} onClick={() => updateStatus(o.id, st)}
+                                    <button key={st} type="button" disabled={updatingOrderId === o.id} onClick={() => void updateStatus(o.id, st)}
                                       className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] font-bold hover:bg-gray-50 transition-colors text-left"
                                       style={{ color: m2.color }}>
                                       <I2 size={11}/> {st}
@@ -367,8 +509,8 @@ export function OrderListPage() {
                           {/* Date */}
                           <td className="px-4 py-3">
                             <div>
-                              <p className="text-[10px] text-gray-500 whitespace-nowrap">{o.date}</p>
-                              <p className="text-[9px] text-gray-400">{o.time}</p>
+                              <p className="text-[10px] text-gray-500">{formatDate(o.createdAt)}</p>
+                              <p className="text-[9px] text-gray-400">{formatTime(o.createdAt)}</p>
                             </div>
                           </td>
                           {/* Actions */}
@@ -384,6 +526,76 @@ export function OrderListPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 sm:p-4 2xl:hidden">
+                {displayed.map(order => {
+                  const statusMeta = STATUS_META[order.status];
+                  const StatusIcon = statusMeta.icon;
+                  return (
+                    <article key={order.id} className="min-w-0 rounded-xl border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-[10px] font-bold text-gray-400" title={order.id}>#{order.id}</p>
+                          <h3 className="mt-1 truncate text-sm font-bold text-gray-900" title={order.customer}>{order.customer}</h3>
+                          {order.phone && <p className="mt-0.5 truncate text-[10px] text-gray-500">{order.phone}</p>}
+                        </div>
+                        <span className="inline-flex max-w-[48%] shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-bold"
+                          style={{ color: statusMeta.color, background: statusMeta.bg }}>
+                          <StatusIcon size={11} className="shrink-0" />
+                          <span className="truncate">{order.status}</span>
+                        </span>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-gray-100 pt-3">
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Total</p>
+                          <p className="mt-0.5 truncate text-xs font-black text-gray-900">{fmt(order.amount)}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Items</p>
+                          <p className="mt-0.5 truncate text-xs font-bold text-gray-700">{order.items}</p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Delivery city</p>
+                          <p className="mt-0.5 truncate text-xs text-gray-700" title={order.city || "Not provided"}>
+                            {order.city || "Not provided"}
+                          </p>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Placed</p>
+                          <p className="mt-0.5 truncate text-[10px] text-gray-700">{formatDate(order.createdAt)}</p>
+                          <p className="truncate text-[9px] text-gray-400">{formatTime(order.createdAt)}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex min-w-0 items-center gap-2 border-t border-gray-100 pt-3">
+                        <label className="sr-only" htmlFor={`order-status-${order.id}`}>Update status for order {order.id}</label>
+                        <select
+                          id={`order-status-${order.id}`}
+                          value={order.status}
+                          disabled={updatingOrderId === order.id}
+                          onChange={event => {
+                            if (isOrderStatus(event.target.value)) void updateStatus(order.id, event.target.value);
+                          }}
+                          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-2 text-[10px] font-bold text-gray-700 disabled:opacity-60"
+                        >
+                          {(Object.keys(STATUS_META) as OrderStatus[]).map(status => (
+                            <option key={status} value={status}>{status}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          aria-label={`View order ${order.id}`}
+                          onClick={() => setDetail(order)}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-blue-50 hover:text-blue-600"
+                        >
+                          <Eye size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              </>
             ) : (
               /* Empty state */
               <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -426,7 +638,9 @@ export function OrderListPage() {
                     <SI size={12}/> {detail.status}
                   </span>
                 ); })()}
-                <select value={detail.status} onChange={e => updateStatus(detail.id, e.target.value as OrderStatus)} className={`${inp} flex-1 text-xs`}>
+                <select value={detail.status} disabled={updatingOrderId === detail.id}
+                  onChange={e => { if (isOrderStatus(e.target.value)) void updateStatus(detail.id, e.target.value); }}
+                  className={`${inp} flex-1 text-xs disabled:opacity-60`}>
                   {(Object.keys(STATUS_META) as OrderStatus[]).map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
@@ -476,12 +690,17 @@ export function OrderListPage() {
                 {/* Summary */}
                 <div className="rounded-2xl border border-gray-200 p-3.5 space-y-2">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Summary</p>
-                  <div className="flex justify-between text-xs"><span className="text-gray-500">Subtotal</span><span className="font-bold text-gray-800">{fmt(detail.amount)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-gray-500">Delivery</span><span className="font-bold text-green-600">FREE</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">Subtotal</span><span className="font-bold text-gray-800">{fmt(detail.subtotal)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">Tax</span><span className="font-bold text-gray-800">{fmt(detail.taxAmount)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">Delivery</span><span className="font-bold text-gray-800">{detail.shippingAmount ? fmt(detail.shippingAmount) : "FREE"}</span></div>
                   <div className="pt-2 border-t border-gray-100 flex justify-between text-sm font-black">
                     <span className="text-gray-900">Total</span>
                     <span style={{ color: G }}>{fmt(detail.amount)}</span>
                   </div>
+                  <p className="pt-1 text-[10px] text-gray-500">
+                    Payment: <span className="font-bold uppercase text-gray-700">{detail.paymentMethod.replace(/[_-]+/g, " ")}</span>
+                    {" · "}<span className="capitalize">{detail.paymentStatus}</span>
+                  </p>
                 </div>
 
                 {/* Order timeline */}
@@ -491,9 +710,10 @@ export function OrderListPage() {
                     const sm    = STATUS_META[step];
                     const SI    = sm.icon;
                     const stepIdx = arr.indexOf(step);
-                    const curIdx  = arr.indexOf(detail.status as OrderStatus);
+                    const curIdx  = arr.indexOf(detail.status);
                     const isDone  = stepIdx <= curIdx && detail.status !== "Cancelled";
                     const isCur   = step === detail.status;
+                    const statusEvent = detail.statusHistory.filter(event => event.status === step).slice(-1)[0];
                     return (
                       <div key={step} className="flex items-start gap-3 relative">
                         {i < arr.length - 1 && (
@@ -508,7 +728,7 @@ export function OrderListPage() {
                         </div>
                         <div className="pb-4">
                           <p className="text-xs font-bold" style={{ color: isDone ? (isCur ? sm.color : "#111827") : "#9ca3af" }}>{step}</p>
-                          {isCur && <p className="text-[9px] font-medium text-gray-400">{detail.time} · {detail.date}</p>}
+                          {statusEvent && <p className="text-[9px] font-medium text-gray-400">{formatDateTime(statusEvent.changedAt)}</p>}
                         </div>
                       </div>
                     );
@@ -518,7 +738,14 @@ export function OrderListPage() {
                       <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2" style={{ background: "#fef2f2", borderColor: "#ef4444" }}>
                         <XCircle size={10} className="text-red-500"/>
                       </div>
-                      <p className="text-xs font-bold text-red-500">Cancelled</p>
+                      <div>
+                        <p className="text-xs font-bold text-red-500">Cancelled</p>
+                        {detail.statusHistory.filter(event => event.status === "Cancelled").slice(-1)[0] && (
+                          <p className="text-[9px] font-medium text-gray-400">
+                            {formatDateTime(detail.statusHistory.filter(event => event.status === "Cancelled").slice(-1)[0].changedAt)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

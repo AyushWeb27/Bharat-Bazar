@@ -196,6 +196,12 @@ export async function POST(req: NextRequest) {
       FROM customer_orders
       WHERE order_number = ${orderNumber}
     `);
+    const insertInitialStatus = sql`
+      INSERT INTO customer_order_status_history (order_id, status, changed_at)
+      SELECT id, 'pending', created_at
+      FROM customer_orders
+      WHERE order_number = ${orderNumber}
+    `;
     const clearCart = fromCart
       ? [sql`DELETE FROM customer_cart_items WHERE user_id = ${userId}`]
       : [];
@@ -203,6 +209,7 @@ export async function POST(req: NextRequest) {
       ...reserveQueries,
       insertOrder,
       ...insertLines,
+      insertInitialStatus,
       ...clearCart,
     ]);
     const orderRows = results[reserveQueries.length] as Array<{ id: number; order_number: string }>;

@@ -25,11 +25,49 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     }
 
     const orders = await sql`
-      SELECT order_number, status, payment_method, payment_status,
+      SELECT customer_orders.order_number, customer_orders.status, payment_method, payment_status,
              subtotal, tax_amount, shipping_amount, total_amount,
-             shipping_address, created_at
+             shipping_address, created_at, updated_at,
+             order_return.status AS return_status,
+             order_return.requested_at AS return_requested_at,
+             order_return.reason AS return_reason,
+             (
+               LOWER(REPLACE(REPLACE(BTRIM(customer_orders.status), ' ', '_'), '-', '_'))
+                 IN ('delivered', 'completed')
+               AND order_return.id IS NULL
+               AND COALESCE(delivery_event.delivered_at, customer_orders.updated_at)
+                 >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+             ) AS return_eligible,
+             COALESCE((
+               SELECT JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'status', history.status,
+                   'changedAt', history.changed_at,
+                   'reason', history.reason
+                 )
+                 ORDER BY history.changed_at, history.id
+               )
+               FROM customer_order_status_history history
+               WHERE history.order_id = customer_orders.id
+             ), JSON_BUILD_ARRAY(
+               JSON_BUILD_OBJECT(
+                 'status', customer_orders.status,
+                 'changedAt', customer_orders.updated_at
+               )
+             )) AS status_history
       FROM customer_orders
-      WHERE order_number = ${orderNumber} AND user_id = ${userId}
+      LEFT JOIN customer_order_returns order_return ON order_return.order_id = customer_orders.id
+      LEFT JOIN LATERAL (
+        SELECT history.changed_at AS delivered_at
+        FROM customer_order_status_history history
+        WHERE history.order_id = customer_orders.id
+          AND LOWER(REPLACE(REPLACE(BTRIM(history.status), ' ', '_'), '-', '_'))
+            IN ('delivered', 'completed')
+        ORDER BY history.changed_at DESC, history.id DESC
+        LIMIT 1
+      ) delivery_event ON TRUE
+      WHERE customer_orders.order_number = ${orderNumber}
+        AND customer_orders.user_id = ${userId}
       LIMIT 1
     `;
     if (!orders.length) {

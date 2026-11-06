@@ -32,7 +32,7 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
 
    Run `npm run db:addresses` to create the customer-linked `user_addresses` table for saved delivery addresses.
 
-   After setting up users, products, and categories, run `npm run db:cart` and `npm run db:orders` to create the customer cart and order tables. Online payments remain unavailable until a payment gateway is configured.
+   After setting up users, products, and categories, run `npm run db:cart` and `npm run db:orders` to create the customer cart and order tables. The orders setup also creates and backfills order-status history and creates the return-request table. Customers can cancel before shipping and request a return within seven days of delivery. Rerun the setup after deploying order-schema changes. Online payments remain unavailable until a payment gateway is configured.
 
 4. **Create and seed the admin categories table in Neon**:
    ```bash

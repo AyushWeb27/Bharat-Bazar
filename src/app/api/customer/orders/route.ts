@@ -18,23 +18,60 @@ export async function GET(req: NextRequest) {
       SELECT o.id, o.order_number, o.status, o.payment_method, o.payment_status,
              o.subtotal, o.tax_amount, o.shipping_amount, o.total_amount,
              o.created_at,
-             COUNT(oi.id)::INT AS item_count,
-             COALESCE(
-               JSON_AGG(
+             order_items.item_count,
+             order_items.items,
+             COALESCE((
+               SELECT JSON_AGG(
                  JSON_BUILD_OBJECT(
-                   'productName', oi.product_name,
-                   'variantTitle', oi.variant_title,
-                   'quantity', oi.quantity,
-                   'lineTotal', oi.line_total,
-                   'image', oi.product_snapshot ->> 'image'
-                 ) ORDER BY oi.id
-               ) FILTER (WHERE oi.id IS NOT NULL),
-               '[]'::json
-             ) AS items
+                   'status', history.status,
+                   'changedAt', history.changed_at,
+                   'reason', history.reason
+                 )
+                 ORDER BY history.changed_at, history.id
+               )
+               FROM customer_order_status_history history
+               WHERE history.order_id = o.id
+             ), '[]'::json) AS status_history,
+             order_return.status AS return_status,
+             order_return.requested_at AS return_requested_at,
+             order_return.reason AS return_reason,
+             (
+               LOWER(REPLACE(REPLACE(BTRIM(o.status), ' ', '_'), '-', '_'))
+                 IN ('delivered', 'completed')
+               AND order_return.id IS NULL
+               AND COALESCE(delivery_event.delivered_at, o.updated_at)
+                 >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+             ) AS return_eligible
       FROM customer_orders o
-      LEFT JOIN customer_order_items oi ON oi.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS item_count,
+          COALESCE(
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'productName', oi.product_name,
+                'variantTitle', oi.variant_title,
+                'quantity', oi.quantity,
+                'lineTotal', oi.line_total,
+                'image', oi.product_snapshot ->> 'image'
+              ) ORDER BY oi.id
+            ),
+            '[]'::json
+          ) AS items
+        FROM customer_order_items oi
+        WHERE oi.order_id = o.id
+      ) order_items ON TRUE
+      LEFT JOIN customer_order_returns order_return ON order_return.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT history.changed_at AS delivered_at
+        FROM customer_order_status_history history
+        WHERE history.order_id = o.id
+          AND LOWER(REPLACE(REPLACE(BTRIM(history.status), ' ', '_'), '-', '_'))
+            IN ('delivered', 'completed')
+        ORDER BY history.changed_at DESC, history.id DESC
+        LIMIT 1
+      ) delivery_event ON TRUE
       WHERE o.user_id = ${userId}
-      GROUP BY o.id
       ORDER BY o.created_at DESC, o.id DESC
       LIMIT 100
     `;

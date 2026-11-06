@@ -46,6 +46,66 @@ async function setupOrders() {
     )
   `;
   await sql`
+    CREATE TABLE IF NOT EXISTS customer_order_status_history (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,
+      status VARCHAR(30) NOT NULL,
+      reason TEXT,
+      changed_by_admin_id INTEGER,
+      changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    ALTER TABLE customer_order_status_history
+    ADD COLUMN IF NOT EXISTS reason TEXT
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS customer_order_status_history_order_idx
+    ON customer_order_status_history (order_id, changed_at, id)
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS customer_order_returns (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL UNIQUE REFERENCES customer_orders(id) ON DELETE CASCADE,
+      status VARCHAR(30) NOT NULL DEFAULT 'requested'
+        CHECK (status IN ('requested', 'approved', 'rejected', 'received', 'refunded', 'cancelled')),
+      reason TEXT NOT NULL DEFAULT '',
+      updated_by_admin_id INTEGER,
+      requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    ALTER TABLE customer_order_returns
+    ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT ''
+  `;
+  await sql`
+    ALTER TABLE customer_order_returns
+    ADD COLUMN IF NOT EXISTS updated_by_admin_id INTEGER
+  `;
+  await sql`
+    INSERT INTO customer_order_status_history (order_id, status, changed_at)
+    SELECT
+      o.id,
+      CASE
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('placed', 'pending') THEN 'pending'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('received', 'confirmed') THEN 'received'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('processed', 'processing') THEN 'processed'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('shipped', 'in_transit') THEN 'shipped'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) = 'out_for_delivery' THEN 'out_for_delivery'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('delivered', 'completed') THEN 'delivered'
+        WHEN LOWER(REPLACE(REPLACE(o.status, ' ', '_'), '-', '_')) IN ('cancelled', 'canceled', 'refunded') THEN 'cancelled'
+        ELSE 'pending'
+      END,
+      o.updated_at
+    FROM customer_orders o
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM customer_order_status_history history
+      WHERE history.order_id = o.id
+    )
+  `;
+  await sql`
     CREATE INDEX IF NOT EXISTS customer_orders_user_created_idx
     ON customer_orders (user_id, created_at DESC)
   `;
