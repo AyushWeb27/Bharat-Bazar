@@ -46,6 +46,36 @@ async function setupOrders() {
     )
   `;
   await sql`
+    CREATE TABLE IF NOT EXISTS customer_product_reviews (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES admin_products(id) ON DELETE CASCADE,
+      order_id INTEGER NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,
+      rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      title VARCHAR(120) NOT NULL,
+      body TEXT NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected')),
+      admin_reply TEXT,
+      updated_by_admin_id INTEGER,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (user_id, product_id)
+    )
+  `;
+  await sql`
+    ALTER TABLE customer_product_reviews
+    ADD COLUMN IF NOT EXISTS updated_by_admin_id INTEGER
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS customer_product_reviews_product_status_idx
+    ON customer_product_reviews (product_id, status, created_at DESC)
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS customer_product_reviews_status_created_idx
+    ON customer_product_reviews (status, created_at DESC)
+  `;
+  await sql`
     CREATE TABLE IF NOT EXISTS customer_order_status_history (
       id SERIAL PRIMARY KEY,
       order_id INTEGER NOT NULL REFERENCES customer_orders(id) ON DELETE CASCADE,

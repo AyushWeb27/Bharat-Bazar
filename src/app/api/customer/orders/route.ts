@@ -49,16 +49,21 @@ export async function GET(req: NextRequest) {
           COALESCE(
             JSON_AGG(
               JSON_BUILD_OBJECT(
+                'productId', oi.product_id,
                 'productName', oi.product_name,
                 'variantTitle', oi.variant_title,
                 'quantity', oi.quantity,
                 'lineTotal', oi.line_total,
-                'image', oi.product_snapshot ->> 'image'
+                'image', oi.product_snapshot ->> 'image',
+                'reviewStatus', product_review.status
               ) ORDER BY oi.id
             ),
             '[]'::json
           ) AS items
         FROM customer_order_items oi
+        LEFT JOIN customer_product_reviews product_review
+          ON product_review.product_id = oi.product_id
+          AND product_review.user_id = o.user_id
         WHERE oi.order_id = o.id
       ) order_items ON TRUE
       LEFT JOIN customer_order_returns order_return ON order_return.order_id = o.id

@@ -6,10 +6,49 @@ import {
   MessageSquare, BadgeCheck,
 } from "lucide-react";
 import { Stars } from "../ui/Stars";
+import { Textarea } from "../ui/textarea";
 import { CardGrid } from "../cards/CardGrid";
 import { fmt } from "../utils/format";
 import { G, GD, PRODUCTS, SWATCHES } from "../data/index";
 import type { Prod } from "../types/index";
+
+type ProductReview = {
+  id: number;
+  rating: number;
+  title: string;
+  body: string;
+  reply: string | null;
+  reviewerName: string;
+  createdAt: string;
+};
+
+type ProductReviewData = {
+  summary: { count: number; average: number; distribution: number[] };
+  reviews: ProductReview[];
+  authenticated: boolean;
+  canReview: boolean;
+  ownReview: { rating: number; title: string; body: string; status: string; createdAt: string } | null;
+};
+
+function isProductReviewData(value: unknown): value is ProductReviewData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  if (!data.summary || typeof data.summary !== "object" || Array.isArray(data.summary)) return false;
+  const summary = data.summary as Record<string, unknown>;
+  return typeof summary.count === "number" && typeof summary.average === "number" &&
+    Array.isArray(summary.distribution) && summary.distribution.every(count => typeof count === "number") &&
+    Array.isArray(data.reviews) && data.reviews.every(review => {
+      if (!review || typeof review !== "object" || Array.isArray(review)) return false;
+      const row = review as Record<string, unknown>;
+      return typeof row.id === "number" && typeof row.rating === "number" &&
+        typeof row.title === "string" && typeof row.body === "string" &&
+        (typeof row.reply === "string" || row.reply === null) &&
+        typeof row.reviewerName === "string" && typeof row.createdAt === "string";
+    }) &&
+    typeof data.authenticated === "boolean" &&
+    typeof data.canReview === "boolean" &&
+    (data.ownReview === null || Boolean(data.ownReview && typeof data.ownReview === "object"));
+}
 
 function renderDescription(content: string) {
   const lines = content.split(/\r?\n/);
@@ -83,6 +122,85 @@ export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBa
   const [qty, setQty] = useState(1);
   const [tab, setTab] = useState<"desc"|"spec"|"reviews">("desc");
   const [zoom, setZoom] = useState(false);
+  const [reviewData, setReviewData] = useState<ProductReviewData | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewTitle, setReviewTitle] = useState("");
+  const [reviewBody, setReviewBody] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadReviews() {
+      setReviewLoading(true);
+      setReviewError("");
+      try {
+        const response = await fetch(`/api/products/${p.id}/reviews`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+            !("success" in result) || result.success !== true ||
+            !("data" in result) || !isProductReviewData(result.data)) {
+          const message = result && typeof result === "object" && "message" in result &&
+            typeof result.message === "string" ? result.message : "Could not load product reviews.";
+          throw new Error(message);
+        }
+        setReviewData(result.data);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load product reviews:", error);
+          setReviewError(error instanceof Error ? error.message : "Could not load product reviews.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setReviewLoading(false);
+      }
+    }
+    void loadReviews();
+    return () => controller.abort();
+  }, [p.id]);
+
+  async function submitProductReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setReviewSubmitting(true);
+    setReviewError("");
+    try {
+      const response = await fetch(`/api/products/${p.id}/reviews`, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: reviewRating, title: reviewTitle, body: reviewBody }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not submit your review.";
+        throw new Error(message);
+      }
+      const refresh = await fetch(`/api/products/${p.id}/reviews`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const refreshed: unknown = await refresh.json();
+      if (!refresh.ok || !refreshed || typeof refreshed !== "object" || Array.isArray(refreshed) ||
+          !("data" in refreshed) || !isProductReviewData(refreshed.data)) {
+        throw new Error("Your review was submitted, but we could not refresh its status.");
+      }
+      setReviewData(refreshed.data);
+      setReviewTitle("");
+      setReviewBody("");
+      setReviewRating(0);
+    } catch (error) {
+      console.error("Failed to submit product review:", error);
+      setReviewError(error instanceof Error ? error.message : "Could not submit your review.");
+    } finally {
+      setReviewSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (p.sizes?.length) {
@@ -246,11 +364,11 @@ export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBa
             <h1 className="max-w-[24ch] break-words text-2xl font-black leading-tight tracking-tight text-foreground sm:text-3xl lg:text-[2.35rem] [overflow-wrap:anywhere]">{p.name}</h1>
           </div>
 
-          {p.reviews > 0 ? <div className="flex items-center gap-3">
-            <Stars r={p.rating}/>
-            <span className="text-sm font-bold text-foreground">{p.rating.toFixed(1)}</span>
+          {(reviewData?.summary.count ?? p.reviews) > 0 ? <div className="flex items-center gap-3">
+            <Stars r={reviewData?.summary.average ?? p.rating}/>
+            <span className="text-sm font-bold text-foreground">{(reviewData?.summary.average ?? p.rating).toFixed(1)}</span>
             <span className="h-4 w-px bg-border"/>
-            <button onClick={() => setTab("reviews")} className="text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">{p.reviews.toLocaleString("en-IN")} customer reviews</button>
+            <button onClick={() => setTab("reviews")} className="text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">{(reviewData?.summary.count ?? p.reviews).toLocaleString("en-IN")} customer reviews</button>
           </div> : <p className="text-xs font-semibold text-muted-foreground">Be the first to review this find</p>}
 
           {/* Price */}
@@ -453,7 +571,7 @@ export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBa
             {([
               { id: "desc", title: "Description", number: "01", subtitle: "The story" },
               { id: "spec", title: "Specifications", number: "02", subtitle: "The details" },
-              { id: "reviews", title: "Reviews", number: "03", subtitle: `${p.reviews.toLocaleString("en-IN")} ratings` },
+              { id: "reviews", title: "Reviews", number: "03", subtitle: `${(reviewData?.summary.count ?? p.reviews).toLocaleString("en-IN")} ratings` },
             ] as const).map(({ id, title, number, subtitle }) => (
               <button
                 type="button"
@@ -560,55 +678,139 @@ export function DetailPage({ p, onAdd, onBuyNow, onWish, wished, wishedIds, onBa
               )
             )}
 
-            {tab === "reviews" && (p.reviews === 0 ? (
-              <div className="flex min-h-52 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-muted/20 px-5 text-center">
-                <Star size={27} className="text-amber-400"/>
-                <h3 className="mt-3 text-sm font-black text-foreground">Your review could be the first</h3>
-                <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">There aren’t any reviews for this product yet. Be the first to share what you think.</p>
-              </div>
-            ) : (
-              <div>
-                <div className="grid gap-5 rounded-2xl bg-[#f3f5ef] p-5 dark:bg-emerald-950/25 sm:grid-cols-[minmax(150px,0.65fr)_minmax(0,1.35fr)] sm:items-center sm:p-6">
-                  <div className="flex items-center gap-4 sm:block sm:text-center">
-                    <div className="text-5xl font-black leading-none tracking-tight text-foreground">{p.rating.toFixed(1)}</div>
+            {tab === "reviews" && (
+              <div className="space-y-5">
+                {reviewError && (
+                  <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                    {reviewError}
+                  </p>
+                )}
+                {reviewData?.canReview && !reviewData.ownReview && (
+                  <form onSubmit={submitProductReview} className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900 dark:bg-emerald-950/20 sm:p-5">
                     <div>
-                      <Stars r={p.rating}/>
-                      <p className="mt-1 text-[10px] font-semibold text-muted-foreground">{p.reviews.toLocaleString("en-IN")} customer reviews</p>
+                      <h3 className="text-sm font-black text-foreground">Share your experience</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Verified customers can review after their order is delivered.</p>
                     </div>
+                    <div>
+                      <p className="mb-2 text-xs font-bold text-foreground">Your rating</p>
+                      <div className="flex items-center gap-1" role="radiogroup" aria-label="Product rating">
+                        {[1, 2, 3, 4, 5].map(value => (
+                          <button key={value} type="button" role="radio" aria-checked={reviewRating === value}
+                            aria-label={`${value} star${value === 1 ? "" : "s"}`}
+                            onClick={() => setReviewRating(value)}
+                            className="rounded p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-700">
+                            <Star size={22} className={value <= reviewRating
+                              ? "fill-amber-400 text-amber-400"
+                              : "fill-zinc-200 text-zinc-300 dark:fill-zinc-700 dark:text-zinc-600"} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input required minLength={3} maxLength={120} value={reviewTitle}
+                      onChange={event => setReviewTitle(event.target.value)}
+                      placeholder="Review title"
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none focus:border-emerald-700" />
+                    <Textarea required minLength={10} maxLength={3000} rows={4} value={reviewBody}
+                      onChange={event => setReviewBody(event.target.value)}
+                      placeholder="What did you like or dislike about this product?"
+                      className="bg-background" />
+                    <button type="submit"
+                      disabled={reviewSubmitting || reviewRating === 0 || reviewTitle.trim().length < 3 || reviewBody.trim().length < 10}
+                      className="rounded-xl px-4 py-2.5 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{ background: G }}>
+                      {reviewSubmitting ? "Submitting…" : "Submit review"}
+                    </button>
+                  </form>
+                )}
+                {reviewData?.ownReview && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/20">
+                    <p className="text-xs font-black text-amber-800 dark:text-amber-300">
+                      Your review is {reviewData.ownReview.status}
+                    </p>
+                    <p className="mt-1 text-xs text-amber-800/80 dark:text-amber-200/80">
+                      {reviewData.ownReview.title} — {reviewData.ownReview.body}
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    {[5,4,3,2,1].map((rating, index) => (
-                      <div key={rating} className="flex items-center gap-2.5">
-                        <span className="w-3 text-right text-[10px] font-bold text-muted-foreground">{rating}</span>
-                        <Star size={11} className="shrink-0 fill-amber-400 text-amber-400"/>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/80 dark:bg-black/20">
-                          <div className="h-full rounded-full bg-emerald-700 dark:bg-emerald-400" style={{ width: `${[75,15,5,3,2][index]}%` }}/>
+                )}
+                {reviewData && !reviewData.authenticated && (
+                  <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                    Sign in and place an order for this product. You can submit a review after it is delivered.
+                  </p>
+                )}
+                {reviewData?.authenticated && !reviewData.canReview && !reviewData.ownReview && (
+                  <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                    Reviews are available to customers after their order for this product is delivered.
+                  </p>
+                )}
+                {reviewLoading && !reviewData && <p className="py-8 text-center text-xs text-muted-foreground">Loading reviews…</p>}
+                {reviewData && (
+                  <>
+                    <div className="grid gap-5 rounded-2xl bg-[#f3f5ef] p-5 dark:bg-emerald-950/25 sm:grid-cols-[minmax(150px,0.65fr)_minmax(0,1.35fr)] sm:items-center sm:p-6">
+                      <div className="flex items-center gap-4 sm:block sm:text-center">
+                        <div className="text-5xl font-black leading-none tracking-tight text-foreground">{reviewData.summary.average.toFixed(1)}</div>
+                        <div>
+                          <Stars r={reviewData.summary.average}/>
+                          <p className="mt-1 text-[10px] font-semibold text-muted-foreground">
+                            {reviewData.summary.count.toLocaleString("en-IN")} approved customer reviews
+                          </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="mt-6 grid gap-3 lg:grid-cols-3">
-                  {[
-                    { name:"Priya S.", city:"Mumbai", text:"Absolutely beautiful quality! The fabric feels premium and the colour is exactly as shown. Very happy with my purchase.", rating:5 },
-                    { name:"Rahul M.", city:"Delhi", text:"Great value for money. Fast delivery within 2 days. Packaging was excellent. Would recommend to everyone!", rating:5 },
-                    { name:"Anita K.", city:"Bengaluru", text:"Good product but sizing runs slightly small. Please order one size up. Customer service was helpful though.", rating:4 },
-                  ].map(review => (
-                    <article key={review.name} className="flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 sm:p-5">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#075b40] text-xs font-black text-white">{review.name[0]}</div>
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-black text-foreground">{review.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{review.city}</p>
-                        </div>
+                      <div className="space-y-2">
+                        {[5, 4, 3, 2, 1].map(rating => {
+                          const count = reviewData.summary.distribution[rating - 1] ?? 0;
+                          const percent = reviewData.summary.count
+                            ? Math.round(count / reviewData.summary.count * 100)
+                            : 0;
+                          return (
+                            <div key={rating} className="flex items-center gap-2.5">
+                              <span className="w-3 text-right text-[10px] font-bold text-muted-foreground">{rating}</span>
+                              <Star size={11} className="shrink-0 fill-amber-400 text-amber-400"/>
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/80 dark:bg-black/20">
+                                <div className="h-full rounded-full bg-emerald-700 dark:bg-emerald-400" style={{ width: `${percent}%` }}/>
+                              </div>
+                              <span className="w-7 text-right text-[10px] text-muted-foreground">{count}</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div className="mt-3"><Stars r={review.rating}/></div>
-                      <p className="mt-3 flex-1 break-words text-xs leading-relaxed text-foreground/80 [overflow-wrap:anywhere]">{review.text}</p>
-                    </article>
-                  ))}
-                </div>
+                    </div>
+                    {reviewData.reviews.length ? (
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {reviewData.reviews.map(review => (
+                          <article key={review.id} className="flex min-w-0 flex-col rounded-2xl border border-border bg-card p-4 sm:p-5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#075b40] text-xs font-black text-white">
+                                {review.reviewerName.slice(0, 1).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-black text-foreground">{review.reviewerName}</p>
+                                <p className="text-[10px] text-muted-foreground">Verified purchase · {new Date(review.createdAt).toLocaleDateString("en-IN")}</p>
+                              </div>
+                              <BadgeCheck size={15} className="ml-auto shrink-0 text-emerald-700 dark:text-emerald-400" aria-label="Verified purchase" />
+                            </div>
+                            <div className="mt-3"><Stars r={review.rating}/></div>
+                            <h4 className="mt-2 text-sm font-black text-foreground">{review.title}</h4>
+                            <p className="mt-2 break-words text-xs leading-relaxed text-foreground/80 [overflow-wrap:anywhere]">{review.body}</p>
+                            {review.reply && (
+                              <div className="mt-3 rounded-lg border-l-2 border-emerald-700 bg-emerald-50/70 px-3 py-2 dark:bg-emerald-950/20">
+                                <p className="text-[10px] font-black text-emerald-800 dark:text-emerald-300">Store reply</p>
+                                <p className="mt-1 whitespace-pre-wrap text-xs text-foreground/80">{review.reply}</p>
+                              </div>
+                            )}
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-muted/20 px-5 text-center">
+                        <Star size={25} className="text-amber-400"/>
+                        <h3 className="mt-2 text-sm font-black text-foreground">No approved reviews yet</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">Be the first verified customer to share an approved review.</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>

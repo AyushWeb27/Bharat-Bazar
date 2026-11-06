@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Navigation, Package,
+  ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Navigation, Package, Star,
   PackageCheck, RefreshCw, Search, ShoppingBag, Truck, XCircle,
 } from "lucide-react";
 import { G } from "../data/index";
@@ -15,11 +15,13 @@ import {
 import { Textarea } from "../ui/textarea";
 
 type OrderItem = {
+  productId: number | null;
   productName: string;
   variantTitle: string | null;
   quantity: number;
   lineTotal: number | string;
   image: string | null;
+  reviewStatus: string | null;
 };
 
 type CustomerOrder = {
@@ -102,11 +104,13 @@ function isOrder(value: unknown): value is CustomerOrder {
     order.items.every(item => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return false;
       const row = item as Record<string, unknown>;
-      return typeof row.productName === "string" &&
+      return (typeof row.productId === "number" || row.productId === null) &&
+        typeof row.productName === "string" &&
         (typeof row.variantTitle === "string" || row.variantTitle === null) &&
         typeof row.quantity === "number" &&
         (typeof row.lineTotal === "number" || typeof row.lineTotal === "string") &&
-        (typeof row.image === "string" || row.image === null);
+        (typeof row.image === "string" || row.image === null) &&
+        (typeof row.reviewStatus === "string" || row.reviewStatus === null);
     });
 }
 
@@ -201,6 +205,13 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
   const [selectedActionReason, setSelectedActionReason] = useState("");
   const [actionReason, setActionReason] = useState("");
   const [actionDialogError, setActionDialogError] = useState("");
+  const [reviewDialog, setReviewDialog] = useState<{ productId: number; productName: string } | null>(null);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewTitle, setReviewTitle] = useState("");
+  const [reviewBody, setReviewBody] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewFeedback, setReviewFeedback] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -390,9 +401,57 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
     }
   }
 
+  async function submitOrderProductReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reviewDialog) return;
+    setReviewBusy(true);
+    setReviewError("");
+    try {
+      const response = await fetch(`/api/products/${reviewDialog.productId}/reviews`, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: reviewRating, title: reviewTitle, body: reviewBody }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("review" in result) || !result.review ||
+          typeof result.review !== "object" || Array.isArray(result.review) ||
+          !("status" in result.review) || typeof result.review.status !== "string") {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not submit your review.";
+        throw new Error(message);
+      }
+      const status = result.review.status;
+      setOrders(previous => previous.map(order => ({
+        ...order,
+        items: order.items.map(item => item.productId === reviewDialog.productId
+          ? { ...item, reviewStatus: status }
+          : item),
+      })));
+      setReviewFeedback(`Your review for ${reviewDialog.productName} was submitted for approval.`);
+      setReviewDialog(null);
+      setReviewRating(0);
+      setReviewTitle("");
+      setReviewBody("");
+    } catch (error) {
+      console.error("Failed to submit order product review:", error);
+      setReviewError(error instanceof Error ? error.message : "Could not submit your review.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
   return (
     <>
     <main className="mx-auto max-w-5xl space-y-5 pb-8">
+      {reviewFeedback && (
+        <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+          {reviewFeedback}
+        </p>
+      )}
       <section className="relative isolate overflow-hidden rounded-[2rem] bg-[#073d2d] px-5 py-7 text-white shadow-[0_24px_70px_-38px_rgba(4,70,48,0.8)] sm:px-8 sm:py-9">
         <div aria-hidden="true" className="pointer-events-none absolute -right-14 -top-20 -z-10 h-64 w-64 rounded-full border-[38px] border-white/[0.05]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 left-1/3 -z-10 h-56 w-56 rounded-full bg-emerald-300/10 blur-3xl" />
@@ -710,6 +769,25 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
                                       <p className="mt-1 text-[10px] text-muted-foreground">
                                         Qty {item.quantity}{item.variantTitle ? ` · ${item.variantTitle}` : ""}
                                       </p>
+                                      {["delivered", "completed"].includes(statusKey(order.status)) &&
+                                        item.productId !== null && (
+                                          item.reviewStatus ? (
+                                            <p className="mt-1 text-[10px] font-bold capitalize text-emerald-700 dark:text-emerald-300">
+                                              Review {item.reviewStatus}
+                                            </p>
+                                          ) : (
+                                            <button type="button" onClick={() => {
+                                              setReviewDialog({ productId: item.productId as number, productName: item.productName });
+                                              setReviewRating(0);
+                                              setReviewTitle("");
+                                              setReviewBody("");
+                                              setReviewError("");
+                                            }}
+                                              className="mt-1 text-[10px] font-black text-emerald-800 underline-offset-2 hover:underline dark:text-emerald-300">
+                                              Write a review
+                                            </button>
+                                          )
+                                        )}
                                     </div>
                                     <p className="shrink-0 text-xs font-black text-foreground">{formatAmount(item.lineTotal)}</p>
                                   </div>
@@ -827,6 +905,69 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
                   {actionBusyOrder !== null
                     ? "Submitting…"
                     : actionDialog.action === "cancel" ? "Confirm cancellation" : "Submit return request"}
+                </button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
+      <Dialog
+        open={reviewDialog !== null}
+        onOpenChange={open => {
+          if (!open && !reviewBusy) {
+            setReviewDialog(null);
+            setReviewError("");
+          }
+        }}
+      >
+        {reviewDialog && (
+          <DialogContent>
+            <form onSubmit={submitOrderProductReview}>
+              <DialogHeader>
+                <DialogTitle>Review {reviewDialog.productName}</DialogTitle>
+                <DialogDescription>
+                  Share your experience with this delivered purchase. Your review will be visible after approval.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-semibold text-foreground">Rating <span className="text-rose-600">*</span></p>
+                <div className="flex items-center gap-1" role="radiogroup" aria-label="Product rating">
+                  {[1, 2, 3, 4, 5].map(value => (
+                    <button key={value} type="button" role="radio" aria-checked={reviewRating === value}
+                      aria-label={`${value} star${value === 1 ? "" : "s"}`}
+                      onClick={() => setReviewRating(value)}
+                      className="rounded p-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-700">
+                      <Star size={22} className={value <= reviewRating
+                        ? "fill-amber-400 text-amber-400"
+                        : "fill-zinc-200 text-zinc-300 dark:fill-zinc-700 dark:text-zinc-600"} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label htmlFor="order-product-review-title" className="mt-4 block text-sm font-semibold text-foreground">
+                Review title
+              </label>
+              <input id="order-product-review-title" required minLength={3} maxLength={120}
+                value={reviewTitle} onChange={event => setReviewTitle(event.target.value)}
+                className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Summarize your experience" />
+              <label htmlFor="order-product-review-body" className="mt-4 block text-sm font-semibold text-foreground">
+                Your review
+              </label>
+              <Textarea id="order-product-review-body" required minLength={10} maxLength={3000} rows={4}
+                value={reviewBody} onChange={event => setReviewBody(event.target.value)}
+                placeholder="What did you like or dislike about the product?"
+                className="mt-2" />
+              {reviewError && <p role="alert" className="mt-3 text-xs font-semibold text-rose-700">{reviewError}</p>}
+              <DialogFooter className="mt-5">
+                <button type="button" disabled={reviewBusy} onClick={() => setReviewDialog(null)}
+                  className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold text-foreground disabled:opacity-60">
+                  Cancel
+                </button>
+                <button type="submit"
+                  disabled={reviewBusy || reviewRating === 0 || reviewTitle.trim().length < 3 || reviewBody.trim().length < 10}
+                  className="rounded-xl bg-emerald-800 px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60">
+                  {reviewBusy ? "Submitting…" : "Submit review"}
                 </button>
               </DialogFooter>
             </form>

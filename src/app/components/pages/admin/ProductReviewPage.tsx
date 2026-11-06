@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Star, CheckCircle2, XCircle, Clock, Search, Filter, Eye, Trash2,
-  ThumbsUp, ShieldCheck, Package, MessageSquare, TrendingUp, ChevronDown, X,
+  Star, CheckCircle2, XCircle, Clock, Search, Eye, Trash2, RefreshCw,
+  ThumbsUp, ShieldCheck, Package, MessageSquare, ChevronDown, X,
 } from "lucide-react";
 import { G, fmt, inp, card } from "./shared/constants";
 import { PageHeader, Field, Toggle } from "./shared/ui";
@@ -221,12 +221,14 @@ function ReviewCard({
   onReject,
   onReply,
   onView,
+  disabled,
 }: {
   review: Review;
   onApprove: () => void;
   onReject: () => void;
   onReply: () => void;
   onView: () => void;
+  disabled: boolean;
 }) {
   return (
     <motion.div
@@ -305,35 +307,35 @@ function ReviewCard({
       <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
         {review.status === "pending" && (
           <>
-            <button onClick={onApprove}
+            <button onClick={onApprove} disabled={disabled}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black text-white transition-all hover:opacity-90"
               style={{ background: G }}>
               <CheckCircle2 size={11} /> Approve
             </button>
-            <button onClick={onReject}
+            <button onClick={onReject} disabled={disabled}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-red-500 hover:bg-red-600 transition-all">
               <XCircle size={11} /> Reject
             </button>
           </>
         )}
         {review.status === "approved" && (
-          <button onClick={onReject}
+          <button onClick={onReject} disabled={disabled}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black bg-red-50 text-red-500 hover:bg-red-100 transition-all">
             <XCircle size={11} /> Un-approve
           </button>
         )}
         {review.status === "rejected" && (
-          <button onClick={onApprove}
+          <button onClick={onApprove} disabled={disabled}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black transition-all hover:opacity-90"
             style={{ background: `${G}15`, color: G }}>
             <CheckCircle2 size={11} /> Approve
           </button>
         )}
-        <button onClick={onReply}
+        <button onClick={onReply} disabled={disabled}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all ml-auto">
           <MessageSquare size={11} /> {review.reply ? "Edit Reply" : "Reply"}
         </button>
-        <button onClick={onView}
+        <button onClick={onView} disabled={disabled}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-black bg-gray-100 text-gray-600 hover:bg-gray-200 transition-all">
           <Eye size={11} /> View
         </button>
@@ -442,12 +444,16 @@ function ViewModal({
   onClose,
   onApprove,
   onReject,
+  onDelete,
+  disabled,
 }: {
   open: boolean;
   review: Review | null;
   onClose: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onDelete: () => void;
+  disabled: boolean;
 }) {
   if (!review) return null;
   return (
@@ -536,19 +542,23 @@ function ViewModal({
               {/* Action buttons */}
               <div className="flex gap-3 pt-2 border-t border-gray-100">
                 {review.status !== "approved" && (
-                  <button onClick={() => { onApprove(); onClose(); }}
+                  <button onClick={() => { onApprove(); onClose(); }} disabled={disabled}
                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black text-white transition-all hover:opacity-90"
                     style={{ background: G }}>
                     <CheckCircle2 size={14} /> Approve
                   </button>
                 )}
                 {review.status !== "rejected" && (
-                  <button onClick={() => { onReject(); onClose(); }}
+                  <button onClick={() => { onReject(); onClose(); }} disabled={disabled}
                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black text-white bg-red-500 hover:bg-red-600 transition-all">
                     <XCircle size={14} /> Reject
                   </button>
                 )}
-                <button onClick={onClose}
+                <button onClick={onDelete} disabled={disabled}
+                  className="flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-bold text-red-600 transition-all hover:bg-red-50">
+                  <Trash2 size={14} /> Delete
+                </button>
+                <button onClick={onClose} disabled={disabled}
                   className="ml-auto px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all">
                   Close
                 </button>
@@ -564,7 +574,12 @@ function ViewModal({
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export function ProductReviewPage() {
-  const [reviews, setReviews] = useState<Review[]>(REVIEWS);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [mutationError, setMutationError] = useState("");
+  const [reload, setReload] = useState(0);
+  const [busyReviewId, setBusyReviewId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [statusTab, setStatusTab] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [ratingFilter, setRatingFilter] = useState(0);
@@ -573,21 +588,155 @@ export function ProductReviewPage() {
   const [viewTarget, setViewTarget] = useState<number | null>(null);
   const [ratingOpen, setRatingOpen] = useState(false);
 
-  // Mutations
-  const approve = (id: number) => setReviews(r => r.map(x => x.id === id ? { ...x, status: "approved" } : x));
-  const reject  = (id: number) => setReviews(r => r.map(x => x.id === id ? { ...x, status: "rejected" } : x));
-  const addReply = (id: number, text: string) =>
-    setReviews(r => r.map(x => x.id === id ? { ...x, reply: text } : x));
-  const removeReply = (id: number) =>
-    setReviews(r => r.map(x => x.id === id ? { ...x, reply: null } : x));
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadReviews() {
+      setLoading(true);
+      setLoadError("");
+      try {
+        const response = await fetch("/api/admin/product-reviews", {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+            !("success" in result) || result.success !== true ||
+            !("reviews" in result) || !Array.isArray(result.reviews)) {
+          const message = result && typeof result === "object" && "message" in result &&
+            typeof result.message === "string" ? result.message : "Could not load product reviews.";
+          throw new Error(message);
+        }
+        const rows = result.reviews.flatMap((value): Review[] => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+          const row = value as Record<string, unknown>;
+          if (typeof row.id !== "number" || typeof row.productName !== "string" ||
+              typeof row.category !== "string" || !row.reviewer ||
+              typeof row.reviewer !== "object" || Array.isArray(row.reviewer) ||
+              typeof row.rating !== "number" || typeof row.title !== "string" ||
+              typeof row.body !== "string" || typeof row.date !== "string" ||
+              !["pending", "approved", "rejected"].includes(String(row.status)) ||
+              (typeof row.reply !== "string" && row.reply !== null)) return [];
+          const reviewer = row.reviewer as Record<string, unknown>;
+          if (typeof reviewer.name !== "string" || typeof reviewer.avatar !== "string" ||
+              typeof reviewer.city !== "string" || typeof reviewer.hasPurchased !== "boolean") return [];
+          return [{
+            id: row.id,
+            productName: row.productName,
+            productImg: "📦",
+            category: row.category,
+            reviewer: {
+              name: reviewer.name,
+              avatar: reviewer.avatar,
+              city: reviewer.city,
+              hasPurchased: reviewer.hasPurchased,
+            },
+            rating: row.rating,
+            title: row.title,
+            body: row.body,
+            date: new Date(row.date).toLocaleDateString("en-IN"),
+            status: row.status as ReviewStatus,
+            helpful: 0,
+            images: 0,
+            reply: typeof row.reply === "string" ? row.reply : null,
+          }];
+        });
+        if (rows.length !== result.reviews.length) {
+          throw new Error("The product reviews response contained invalid records.");
+        }
+        setReviews(rows);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load admin product reviews:", error);
+          setLoadError(error instanceof Error ? error.message : "Could not load product reviews.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void loadReviews();
+    return () => controller.abort();
+  }, [reload]);
+
+  async function updateReview(id: number, changes: { status?: ReviewStatus; reply?: string | null }) {
+    setMutationError("");
+    setBusyReviewId(id);
+    try {
+      const response = await fetch("/api/admin/product-reviews", {
+        method: "PATCH",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...changes }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("review" in result) || !result.review ||
+          typeof result.review !== "object" || Array.isArray(result.review)) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not update this review.";
+        throw new Error(message);
+      }
+      const updated = result.review as Record<string, unknown>;
+      if (updated.id !== id || !["pending", "approved", "rejected"].includes(String(updated.status)) ||
+          (typeof updated.reply !== "string" && updated.reply !== null)) {
+        throw new Error("The review update response was invalid.");
+      }
+      setReviews(previous => previous.map(review => review.id === id
+        ? { ...review, status: updated.status as ReviewStatus, reply: updated.reply as string | null }
+        : review));
+    } catch (error) {
+      console.error("Failed to update product review:", error);
+      setMutationError(error instanceof Error ? error.message : "Could not update this review.");
+    } finally {
+      setBusyReviewId(null);
+    }
+  }
+
+  async function deleteReview(id: number) {
+    if (!window.confirm("Delete this product review permanently?")) return;
+    setMutationError("");
+    setBusyReviewId(id);
+    try {
+      const response = await fetch("/api/admin/product-reviews", {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok || !result || typeof result !== "object" || Array.isArray(result) ||
+          !("success" in result) || result.success !== true ||
+          !("deletedId" in result) || result.deletedId !== id) {
+        const message = result && typeof result === "object" && "message" in result &&
+          typeof result.message === "string" ? result.message : "Could not delete this review.";
+        throw new Error(message);
+      }
+      setReviews(previous => previous.filter(review => review.id !== id));
+      setViewTarget(null);
+      setReplyTarget(null);
+    } catch (error) {
+      console.error("Failed to delete product review:", error);
+      setMutationError(error instanceof Error ? error.message : "Could not delete this review.");
+    } finally {
+      setBusyReviewId(null);
+    }
+  }
+
+  const approve = (id: number) => void updateReview(id, { status: "approved" });
+  const reject  = (id: number) => void updateReview(id, { status: "rejected" });
+  const addReply = (id: number, text: string) => void updateReview(id, { reply: text });
+  const removeReply = (id: number) => void updateReview(id, { reply: null });
 
   // Stats
   const total     = reviews.length;
   const pending   = reviews.filter(r => r.status === "pending").length;
   const approved  = reviews.filter(r => r.status === "approved").length;
   const rejected  = reviews.filter(r => r.status === "rejected").length;
-  const avgRating = (reviews.reduce((s, r) => s + r.rating, 0) / total).toFixed(1);
-  const verifiedPct = Math.round((reviews.filter(r => r.reviewer.hasPurchased).length / total) * 100);
+  const avgRating = total ? (reviews.reduce((s, r) => s + r.rating, 0) / total).toFixed(1) : "0.0";
+  const verifiedPct = total ? Math.round((reviews.filter(r => r.reviewer.hasPurchased).length / total) * 100) : 0;
 
   // Filter
   const filtered = reviews.filter(r => {
@@ -624,6 +773,22 @@ export function ProductReviewPage() {
         subtitle="Manage customer reviews across all products"
         count={total}
       />
+      {loadError && (
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => setReload(value => value + 1)} className="font-black underline">Retry</button>
+        </div>
+      )}
+      <button type="button" onClick={() => setReload(value => value + 1)} disabled={loading}
+        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 disabled:opacity-50">
+        <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh reviews
+      </button>
+      {mutationError && (
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+          {mutationError}
+        </p>
+      )}
+      {loading && <p className="rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-xs text-gray-500">Loading product reviews…</p>}
 
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -740,7 +905,7 @@ export function ProductReviewPage() {
 
       {/* Review cards */}
       <AnimatePresence mode="popLayout">
-        {filtered.length === 0 ? (
+        {!loading && !loadError && filtered.length === 0 ? (
           <motion.div
             key="empty"
             initial={{ opacity: 0 }}
@@ -757,7 +922,7 @@ export function ProductReviewPage() {
               Clear all filters
             </button>
           </motion.div>
-        ) : (
+        ) : !loading && !loadError ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filtered.map(r => (
               <ReviewCard
@@ -767,10 +932,11 @@ export function ProductReviewPage() {
                 onReject={() => reject(r.id)}
                 onReply={() => setReplyTarget(r.id)}
                 onView={() => setViewTarget(r.id)}
+                disabled={busyReviewId === r.id}
               />
             ))}
           </div>
-        )}
+        ) : null}
       </AnimatePresence>
 
       {/* Results count */}
@@ -796,6 +962,8 @@ export function ProductReviewPage() {
         onClose={() => setViewTarget(null)}
         onApprove={() => viewTarget !== null && approve(viewTarget)}
         onReject={() => viewTarget !== null && reject(viewTarget)}
+        onDelete={() => viewTarget !== null && void deleteReview(viewTarget)}
+        disabled={busyReviewId === viewTarget}
       />
     </div>
   );
