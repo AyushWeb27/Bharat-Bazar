@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { ADMIN_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 import { sql } from "@/lib/db";
+import { sanitizeGroupCategorySvg } from "@/lib/group-category-svg";
 
 export interface GroupCategory {
   id: number;
@@ -8,6 +9,7 @@ export interface GroupCategory {
   slug: string;
   color: string;
   description: string;
+  iconSvg: string;
   active: boolean;
 }
 
@@ -16,6 +18,7 @@ export interface GroupCategoryInput {
   slug: string;
   color: string;
   description: string;
+  iconSvg: string;
   active: boolean;
 }
 
@@ -41,6 +44,7 @@ export function parseGroupCategoryInput(value: unknown): GroupCategoryInput | nu
     typeof input.slug !== "string" ||
     typeof input.color !== "string" ||
     (input.description !== undefined && typeof input.description !== "string") ||
+    (input.iconSvg !== undefined && typeof input.iconSvg !== "string") ||
     typeof input.active !== "boolean"
   ) {
     return null;
@@ -50,16 +54,18 @@ export function parseGroupCategoryInput(value: unknown): GroupCategoryInput | nu
   const slug = input.slug.trim().toLowerCase();
   const color = input.color.trim();
   const description = typeof input.description === "string" ? input.description.trim() : "";
+  const iconSvg = sanitizeGroupCategorySvg(input.iconSvg ?? "");
   if (
     !name || name.length > 120 ||
     slug.length > 120 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ||
     !/^#[0-9a-f]{6}$/i.test(color) ||
-    description.length > 1000
+    description.length > 1000 ||
+    iconSvg === null
   ) {
     return null;
   }
 
-  return { name, slug, color, description, active: input.active };
+  return { name, slug, color, description, iconSvg, active: input.active };
 }
 
 export function mapGroupCategory(row: Record<string, unknown>): GroupCategory {
@@ -69,6 +75,7 @@ export function mapGroupCategory(row: Record<string, unknown>): GroupCategory {
     slug: String(row.slug),
     color: String(row.color),
     description: String(row.description || ""),
+    iconSvg: sanitizeGroupCategorySvg(row.icon_svg) || "",
     active: Boolean(row.active),
   };
 }

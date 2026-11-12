@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
+import { sanitizeGroupCategorySvg } from "@/lib/group-category-svg";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export async function GET() {
       ORDER BY g.id ASC, c.name ASC, c.id ASC
     `,
       sql`
-      SELECT id, name, color
+      SELECT id, name, color, icon_svg
       FROM admin_group_categories
       WHERE active = TRUE
       ORDER BY id ASC
@@ -69,6 +70,7 @@ export async function GET() {
           id: Number(row.id),
           name: String(row.name || ""),
           color: String(row.color || "#009966"),
+          iconSvg: sanitizeGroupCategorySvg(row.icon_svg) || "",
         })),
         categories: rows.map(row => ({
           id: Number(row.id),

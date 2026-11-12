@@ -4,6 +4,7 @@ import {
   AlertCircle, CheckCircle2, XCircle, FolderOpen, Pencil, Trash2, Layers, Loader2,
 } from "lucide-react";
 import type { GroupCategory } from "@/lib/group-categories";
+import { groupCategorySvgDataUri } from "@/lib/group-category-svg-data-uri";
 import { G, toSlug, GROUP_COLORS, inp, card } from "./shared/constants";
 import { PageHeader, SearchBar, StatCard, Modal, Field, Toggle, StatusPill, DeleteConfirm } from "./shared/ui";
 
@@ -12,6 +13,7 @@ type GroupForm = {
   slug: string;
   color: string;
   description: string;
+  iconSvg: string;
   active: boolean;
 };
 
@@ -20,6 +22,7 @@ const EMPTY_FORM: GroupForm = {
   slug: "",
   color: G,
   description: "",
+  iconSvg: "",
   active: true,
 };
 
@@ -80,6 +83,7 @@ export function GroupCategoryPage() {
       slug: group.slug,
       color: group.color,
       description: group.description || "",
+      iconSvg: group.iconSvg || "",
       active: group.active,
     });
     setModalOpen(true);
@@ -215,7 +219,15 @@ export function GroupCategoryPage() {
                     <div className="h-1.5 rounded-full mb-4" style={{ background: group.color }} />
                     <div className="flex items-start justify-between mb-3">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${group.color}15` }}>
-                        <FolderOpen size={18} style={{ color: group.color }} />
+                        {group.iconSvg ? (
+                          <img
+                            src={groupCategorySvgDataUri(group.iconSvg, group.color)}
+                            alt=""
+                            className="h-8 w-8 object-contain"
+                          />
+                        ) : (
+                          <FolderOpen size={18} style={{ color: group.color }} />
+                        )}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button aria-label={`Edit ${group.name}`} onClick={() => openEdit(group)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all">
@@ -292,6 +304,28 @@ export function GroupCategoryPage() {
                 }}
               />
             ))}
+          </div>
+        </Field>
+        <Field label="SVG Icon">
+          <textarea
+            value={form.iconSvg}
+            maxLength={12000}
+            onChange={event => setForm(current => ({ ...current, iconSvg: event.target.value }))}
+            placeholder='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="..." /></svg>'
+            rows={5}
+            className={`${inp} resize-y font-mono text-xs`}
+          />
+          <p className="mt-1.5 text-xs text-gray-500">Paste SVG markup. Scripts, links, and unsupported elements are removed.</p>
+          <div className="mt-3 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: `${form.color}15` }}>
+            {form.iconSvg.trim() ? (
+              <img
+                src={groupCategorySvgDataUri(form.iconSvg, form.color)}
+                alt="SVG icon preview"
+                className="h-8 w-8 object-contain"
+              />
+            ) : (
+              <FolderOpen size={22} className="text-gray-400" />
+            )}
           </div>
         </Field>
         <Field label="Description">

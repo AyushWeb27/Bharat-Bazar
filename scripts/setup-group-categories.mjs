@@ -20,12 +20,17 @@ async function setupGroupCategories() {
       slug VARCHAR(120) NOT NULL UNIQUE,
       color VARCHAR(7) NOT NULL DEFAULT '#009966',
       description TEXT NOT NULL DEFAULT '',
+      icon_svg TEXT NOT NULL DEFAULT '',
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT admin_group_categories_color_format
         CHECK (color ~ '^#[0-9A-Fa-f]{6}$')
     )
+  `;
+  await sql`
+    ALTER TABLE admin_group_categories
+    ADD COLUMN IF NOT EXISTS icon_svg TEXT NOT NULL DEFAULT ''
   `;
 
   const seedGroups = [

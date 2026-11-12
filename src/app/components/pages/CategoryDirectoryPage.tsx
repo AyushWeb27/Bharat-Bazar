@@ -11,11 +11,13 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { groupCategorySvgDataUri } from "@/lib/group-category-svg-data-uri";
 
 type CategoryGroup = {
   id: number;
   name: string;
   color: string;
+  iconSvg: string;
 };
 
 type StoreCategory = {
@@ -35,7 +37,8 @@ function isCategoryGroup(value: unknown): value is CategoryGroup {
   const group = value as Record<string, unknown>;
   return typeof group.id === "number" &&
     typeof group.name === "string" &&
-    typeof group.color === "string";
+    typeof group.color === "string" &&
+    typeof group.iconSvg === "string";
 }
 
 function isStoreCategory(value: unknown): value is StoreCategory {
@@ -187,7 +190,16 @@ export function CategoryDirectoryPage() {
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: group.color }} />
+                      {group.iconSvg ? (
+                        <img
+                          src={groupCategorySvgDataUri(group.iconSvg, group.color)}
+                          alt=""
+                          aria-hidden="true"
+                          className="h-5 w-5 shrink-0 object-contain"
+                        />
+                      ) : (
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: group.color }} />
+                      )}
                       {group.name}
                     </span>
                     <span className="text-[10px] opacity-70">{groupCount}</span>

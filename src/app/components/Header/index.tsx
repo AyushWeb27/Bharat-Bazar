@@ -1,12 +1,29 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Search, ShoppingCart, Heart, Menu, X, Home, IndianRupee, Bell, CheckCircle, LogOut,
+  Search, ShoppingCart, Heart, Menu, X, Home, IndianRupee, Bell, CheckCircle, LogOut, Layers3, ArrowRight,
 } from "lucide-react";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { G, CATEGORIES } from "../data/index";
 import type { Page } from "../types/index";
 import { useApp } from "../../context/AppContext";
+import { groupCategorySvgDataUri } from "@/lib/group-category-svg-data-uri";
+
+type HeaderGroup = {
+  id: number;
+  name: string;
+  color: string;
+  iconSvg: string;
+};
+
+function isHeaderGroup(value: unknown): value is HeaderGroup {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const group = value as Record<string, unknown>;
+  return typeof group.id === "number" &&
+    typeof group.name === "string" &&
+    typeof group.color === "string" &&
+    typeof group.iconSvg === "string";
+}
 
 const NOTIFS = [
   { id:1, icon:"📦", text:"Your order #BB2610050001 has been shipped!", time:"2 min ago", unread:true },
@@ -24,8 +41,49 @@ export function Header({ dark, setDark, cartCount, wish, page, setPage, query, s
   const [searchFocus, setSearchFocus] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [readIds, setReadIds] = useState<Set<number>>(new Set());
+  const [headerGroups, setHeaderGroups] = useState<HeaderGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const unreadCount = NOTIFS.filter(n => n.unread && !readIds.has(n.id)).length;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadGroups() {
+      try {
+        const response = await fetch("/api/categories", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result: unknown = await response.json();
+        if (
+          !response.ok ||
+          !result ||
+          typeof result !== "object" ||
+          !("success" in result) ||
+          result.success !== true ||
+          !("groups" in result) ||
+          !Array.isArray(result.groups) ||
+          !result.groups.every(isHeaderGroup)
+        ) {
+          throw new Error("Failed to load group categories for the header.");
+        }
+        setHeaderGroups(result.groups);
+        setGroupsError(false);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to load header group categories:", error);
+          setGroupsError(true);
+        }
+      } finally {
+        if (!controller.signal.aborted) setGroupsLoading(false);
+      }
+    }
+
+    void loadGroups();
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -267,32 +325,73 @@ export function Header({ dark, setDark, cartCount, wish, page, setPage, query, s
             </div>
           </div>
 
-          {/* ── SUB-NAV ── */}
-          <div className="hidden md:flex items-center gap-1 pb-2 overflow-x-auto scrollbar-hide">
-            {[
-              ["🔥 Today's Deals","products"],
-              ["🪔 Festival Sale","products"],
-              ["🥻 Sarees","products"],
-              ["📱 Mobiles","products"],
-              ["💍 Jewellery","products"],
-              ["🌿 Ayurveda","products"],
-              ["🏏 Cricket","products"],
-              ["🏠 Home & Décor","products"],
-              ["📚 Books","products"],
-            ].map(([label, pg]) => (
-              <motion.button key={label} whileHover={{ y:-1 }}
-                onClick={() => setPage(pg as Page)}
-                className="text-[11px] font-bold text-muted-foreground hover:text-foreground whitespace-nowrap transition-colors px-2.5 py-1.5 rounded-lg hover:bg-muted border-b-2 border-transparent hover:border-[#009966]">
-                {label}
+          {/* ── GROUP CATEGORY NAV ── */}
+          <div className="pb-2.5 pt-1 md:pb-3">
+            <div className="flex items-center gap-3">
+              <div className="hidden shrink-0 sm:block">
+                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-foreground/80">
+                  Collections
+                </p>
+                <p className="mt-0.5 text-[8px] font-medium text-muted-foreground">
+                  Find your next favorite
+                </p>
+              </div>
+              <nav aria-label="Shop by group category" className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1">
+                {headerGroups.map(group => (
+                  <motion.button
+                    key={group.id}
+                    type="button"
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setPage("products")}
+                    aria-label={group.name}
+                    title={group.name}
+                    className="group relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-all hover:border-transparent hover:shadow-md sm:h-11 sm:w-11 sm:rounded-2xl"
+                  >
+                    <span
+                      className="flex h-8 w-8 items-center justify-center rounded-lg transition-transform group-hover:scale-110 sm:h-9 sm:w-9 sm:rounded-xl"
+                      style={{ backgroundColor: `${group.color}14` }}
+                    >
+                      {group.iconSvg ? (
+                        <img
+                          src={groupCategorySvgDataUri(group.iconSvg, group.color)}
+                          alt=""
+                          aria-hidden="true"
+                          className="h-6 w-6 object-contain sm:h-7 sm:w-7"
+                        />
+                      ) : (
+                        <Layers3 size={16} style={{ color: group.color }} aria-hidden="true" />
+                      )}
+                    </span>
+                    <span
+                      className="absolute inset-x-2 bottom-0 h-0.5 origin-left scale-x-0 rounded-full transition-transform group-hover:scale-x-100"
+                      style={{ backgroundColor: group.color }}
+                    />
+                  </motion.button>
+                ))}
+                {groupsLoading && (
+                  <span className="flex h-10 shrink-0 items-center gap-2 text-[10px] font-semibold text-muted-foreground" aria-live="polite">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-[#009966]" />
+                    Loading
+                  </span>
+                )}
+                {groupsError && !groupsLoading && (
+                  <span role="alert" className="shrink-0 text-[10px] font-semibold text-red-600">
+                    Unavailable
+                  </span>
+                )}
+              </nav>
+              <motion.button
+                type="button"
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={() => setPage("category")}
+                className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#009966]/20 bg-[#009966]/[0.07] px-3 text-[10px] font-black text-[#007a52] transition-colors hover:border-[#009966]/40 hover:bg-[#009966]/[0.12] sm:h-10 sm:px-3.5 sm:text-[11px]"
+              >
+                View all
+                <ArrowRight size={13} />
               </motion.button>
-            ))}
-            {/* Sale badge */}
-            <motion.button whileHover={{ scale:1.05 }} whileTap={{ scale:0.95 }}
-              onClick={() => setPage("products")}
-              className="ml-auto shrink-0 text-[10px] font-black text-white px-3 py-1 rounded-full"
-              style={{ background:`linear-gradient(to right, #ef4444, #f97316)` }}>
-              🔥 SALE
-            </motion.button>
+            </div>
           </div>
         </div>
       </header>

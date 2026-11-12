@@ -27,6 +27,7 @@ India's #1 Online Marketplace web application built with **Next.js (App Router)*
    ```bash
    npm run db:group-categories
    ```
+   This setup also adds the `icon_svg` field used by SVG icons in the admin group-category editor and storefront.
 
    For the database-backed Admin Customers page, also run `npm run db:users`. This creates or updates the customer `users` table, including gender, date of birth, and VIP fields.
 

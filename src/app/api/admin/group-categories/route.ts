@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     if (!(await getActiveAdminId(req))) return unauthorized();
 
     const rows = await sql`
-      SELECT id, name, slug, color, description, active
+      SELECT id, name, slug, color, description, icon_svg, active
       FROM admin_group_categories
       ORDER BY id ASC
     `;
@@ -53,15 +53,15 @@ export async function POST(req: NextRequest) {
     const input = parseGroupCategoryInput(body);
     if (!input) {
       return NextResponse.json(
-        { success: false, message: "Enter a valid name, slug, color, description, and status." },
+        { success: false, message: "Check the group name, slug, color, description, and status. If provided, the icon must be valid SVG markup (up to 12,000 characters)." },
         { status: 400 }
       );
     }
 
     const rows = await sql`
-      INSERT INTO admin_group_categories (name, slug, color, description, active)
-      VALUES (${input.name}, ${input.slug}, ${input.color}, ${input.description}, ${input.active})
-      RETURNING id, name, slug, color, description, active
+      INSERT INTO admin_group_categories (name, slug, color, description, icon_svg, active)
+      VALUES (${input.name}, ${input.slug}, ${input.color}, ${input.description}, ${input.iconSvg}, ${input.active})
+      RETURNING id, name, slug, color, description, icon_svg, active
     `;
     return NextResponse.json(
       {

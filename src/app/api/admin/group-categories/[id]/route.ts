@@ -42,7 +42,7 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
     const input = parseGroupCategoryInput(body);
     if (!input) {
       return NextResponse.json(
-        { success: false, message: "Enter a valid name, slug, color, description, and status." },
+        { success: false, message: "Check the group name, slug, color, description, and status. If provided, the icon must be valid SVG markup (up to 12,000 characters)." },
         { status: 400 }
       );
     }
@@ -53,10 +53,11 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
           slug = ${input.slug},
           color = ${input.color},
           description = ${input.description},
+          icon_svg = ${input.iconSvg},
           active = ${input.active},
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ${id}
-      RETURNING id, name, slug, color, description, active
+      RETURNING id, name, slug, color, description, icon_svg, active
     `;
     if (!rows.length) {
       return NextResponse.json({ success: false, message: "Group category not found." }, { status: 404 });
