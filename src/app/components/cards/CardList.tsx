@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Heart, Truck } from "lucide-react";
+import { Heart, Package, Truck } from "lucide-react";
 import { Stars } from "../ui/Stars";
 import { fmt } from "../utils/format";
 import { G } from "../data/index";
@@ -16,10 +16,22 @@ export function CardList({ p, onAdd, onWish, wished, onView }: {
       onClick={() => onView(p)}
     >
       {/* Left image */}
-      <div className="w-44 md:w-56 shrink-0 relative overflow-hidden">
-        <img src={p.img} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" style={{ minHeight:180 }} />
+      <div className="w-44 md:w-56 shrink-0 relative overflow-hidden bg-muted">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-50 to-stone-100 text-emerald-800">
+          <Package size={28} strokeWidth={1.5} />
+          <span className="px-3 text-center text-[9px] font-bold">Product image coming soon</span>
+        </div>
+        {p.img && (
+          <img
+            src={p.img}
+            alt={p.name}
+            onError={event => { event.currentTarget.style.display = "none"; }}
+            className="relative h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            style={{ minHeight:180 }}
+          />
+        )}
         <div className="absolute top-2.5 left-2.5">
-          <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">-{p.off}%</span>
+          {p.off > 0 && <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">-{p.off}%</span>}
         </div>
         {/* Green left accent */}
         <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: G }} />
@@ -30,8 +42,9 @@ export function CardList({ p, onAdd, onWish, wished, onView }: {
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{p.brand}</p>
-              <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white" style={{ background: p.tagClr }}>{p.tag}</span>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{p.brand || "Bharat Bazar"}</p>
+              {p.cat && <span className="rounded-full bg-muted px-2 py-0.5 text-[9px] font-bold text-muted-foreground">{p.cat}</span>}
+              {p.tag && <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white" style={{ background: p.tagClr }}>{p.tag}</span>}
             </div>
             <h3 className="text-base font-black text-foreground leading-snug mt-0.5 line-clamp-1">{p.name}</h3>
           </div>
@@ -47,10 +60,10 @@ export function CardList({ p, onAdd, onWish, wished, onView }: {
 
         <div className="flex items-baseline gap-2 mt-auto">
           <span className="text-xl font-black text-foreground">{fmt(p.price)}</span>
-          <span className="text-sm text-muted-foreground line-through">{fmt(p.mrp)}</span>
-          <span className="text-xs font-black text-red-500">{p.off}% off</span>
+          {p.mrp > p.price && <span className="text-sm text-muted-foreground line-through">{fmt(p.mrp)}</span>}
+          {p.off > 0 && <span className="text-xs font-black text-red-500">{p.off}% off</span>}
         </div>
-        <p className="text-xs font-bold" style={{ color: G }}>You save {fmt(p.mrp - p.price)}</p>
+        {p.mrp > p.price && <p className="text-xs font-bold" style={{ color: G }}>You save {fmt(p.mrp - p.price)}</p>}
 
         <div className="flex items-center gap-3 flex-wrap">
           {p.freeShip && <span className="text-[10px] font-bold flex items-center gap-1" style={{ color: G }}><Truck size={10}/> Free Delivery</span>}
