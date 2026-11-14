@@ -48,26 +48,62 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
           : null;
     if (!url) return failure("Product media not found.", 404);
 
-    const mediaKind: ProductMediaKind = kind;
-    const object = await loadProductMedia(productId, mediaKind, index);
-    if (!object.Body) return failure("Product media not found.", 404);
-    const contentType = object.ContentType || "application/octet-stream";
-    const allowedTypes = kind === "video"
-      ? ["video/mp4", "video/webm"]
-      : ["image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif"];
-    if (!allowedTypes.includes(contentType)) return failure("Product media has an unsupported format.", 415);
+    const mediaStr = String(url).trim();
+    if (mediaStr.startsWith("data:")) {
+      const match = mediaStr.match(/^data:([^;]+);base64,(.+)$/s);
+      if (match) {
+        const contentType = match[1];
+        const base64Data = match[2];
+        const buffer = Buffer.from(base64Data, "base64");
+        return new NextResponse(buffer, {
+          headers: {
+            "Content-Type": contentType,
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+          },
+        });
+      }
+    }
 
-    const bytes = await object.Body.transformToByteArray();
-    const body = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(body).set(bytes);
-    return new NextResponse(body, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": "private, max-age=300",
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": "inline",
-      },
-    });
+    if (mediaStr.startsWith("http://") || mediaStr.startsWith("https://")) {
+      return NextResponse.redirect(mediaStr, 307);
+    }
+
+    const mediaKind: ProductMediaKind = kind;
+    try {
+      const object = await loadProductMedia(productId, mediaKind, index);
+      if (!object.Body) return failure("Product media not found.", 404);
+      const contentType = object.ContentType || "application/octet-stream";
+      const allowedTypes = kind === "video"
+        ? ["video/mp4", "video/webm"]
+        : ["image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff", "image/avif"];
+      if (!allowedTypes.includes(contentType)) return failure("Product media has an unsupported format.", 415);
+
+      const bytes = await object.Body.transformToByteArray();
+      const body = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(body).set(bytes);
+      return new NextResponse(body, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "private, max-age=300",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Disposition": "inline",
+        },
+      });
+    } catch (s3Error: unknown) {
+      const isNotFound = Boolean(
+        s3Error && typeof s3Error === "object" && (
+          ("name" in s3Error && (s3Error.name === "NoSuchKey" || s3Error.name === "NotFound")) ||
+          ("Code" in s3Error && s3Error.Code === "NoSuchKey") ||
+          ("$metadata" in s3Error && (s3Error.$metadata as { httpStatusCode?: number })?.httpStatusCode === 404)
+        )
+      );
+      if (isNotFound) {
+        return failure("Product media not found.", 404);
+      }
+      throw s3Error;
+    }
   } catch (error) {
     console.error("GET /api/admin/products/[id]/media/[kind] error:", error);
     return failure("Failed to load product media.", 500);
