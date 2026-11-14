@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
+import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import { motion, AnimatePresence } from "motion/react";
 import {
   ListOrdered, Clock, PackageCheck, Package, Truck,
@@ -145,6 +148,15 @@ export function OrderListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  // ── Neon Realtime: live order list ──────────────────────────────────────
+  type LiveOrder = { order_number: string; status: string; total_amount: string; created_at: string; updated_at: string; customer_name: string };
+  const { data: liveOrders, status: realtimeStatus } = useRealtimeQuery<LiveOrder>(
+    () =>
+      fetch("/api/realtime/orders-list", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((j: { sealedQuery: SealedLiveQuery<LiveOrder> }) => j.sealedQuery)
+  );
 
   const loadOrders = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -368,6 +380,12 @@ export function OrderListPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <RealtimeBadge status={realtimeStatus} />
+                {liveOrders !== undefined && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black text-green-700">
+                    🔴 Live · {liveOrders.length} orders
+                  </span>
+                )}
                 <button type="button" onClick={exportOrders} disabled={loading || displayed.length === 0}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50 transition-all disabled:cursor-not-allowed disabled:opacity-50">
                   <Download size={12}/> Export

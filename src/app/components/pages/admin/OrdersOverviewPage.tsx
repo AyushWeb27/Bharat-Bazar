@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
+import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import { motion } from "motion/react";
 import {
   ShoppingCart, Clock, Package, Truck, CheckCircle2, XCircle,
@@ -120,6 +123,15 @@ export function OrdersOverviewPage({ onNav }: { onNav: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // ── Neon Realtime: live order status counts ──────────────────────────────
+  type LiveOrderStatus = { status: string; count: number; total_amount: string };
+  const { data: liveStatusData, status: realtimeStatus } = useRealtimeQuery<LiveOrderStatus>(
+    () =>
+      fetch("/api/realtime/orders-overview", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((j: { sealedQuery: SealedLiveQuery<LiveOrderStatus> }) => j.sealedQuery)
+  );
+
   const loadOverview = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError("");
@@ -164,6 +176,7 @@ export function OrdersOverviewPage({ onNav }: { onNav: (id: string) => void }) {
     <div className="space-y-6">
       <PageHeader breadcrumb="Orders" title="Orders Overview"
         subtitle="Manage and track customer orders using live database data">
+        <RealtimeBadge status={realtimeStatus} />
         <button type="button" onClick={() => void loadOverview()} disabled={loading}
           className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Refresh
