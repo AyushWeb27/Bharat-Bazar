@@ -50,10 +50,12 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
 
     const mediaStr = String(url).trim();
     if (mediaStr.startsWith("data:")) {
-      const match = mediaStr.match(/^data:([^;]+);base64,(.+)$/s);
-      if (match) {
-        const contentType = match[1];
-        const base64Data = match[2];
+      const commaIdx = mediaStr.indexOf(",");
+      if (commaIdx !== -1) {
+        const header = mediaStr.slice(0, commaIdx);
+        const base64Data = mediaStr.slice(commaIdx + 1);
+        const mimeMatch = header.match(/^data:([^;]+)/);
+        const contentType = mimeMatch ? mimeMatch[1] : (kind === "video" ? "video/mp4" : "image/jpeg");
         const buffer = Buffer.from(base64Data, "base64");
         return new NextResponse(buffer, {
           headers: {
