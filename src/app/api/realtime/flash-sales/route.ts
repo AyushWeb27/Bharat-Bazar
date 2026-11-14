@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
   const sealedQuery = await realtime.seal({
-    query: rawSql`
-      SELECT
+    query: rawSql(
+      `SELECT
         fs.id,
         fs.name,
         fs.discount_type,
@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
         fs.end_at,
         fs.is_active
       FROM admin_flash_sales fs
-      ORDER BY fs.start_at DESC
-    `,
+      ORDER BY fs.start_at DESC`
+    ),
   });
   return NextResponse.json({ success: true, sealedQuery });
 }

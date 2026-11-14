@@ -166,6 +166,31 @@ export function OrdersOverviewPage({ onNav }: { onNav: (id: string) => void }) {
     return () => controller.abort();
   }, [loadOverview]);
 
+  const activeMetrics = useMemo(() => {
+    if (!data?.metrics) return null;
+    if (!liveStatusData || liveStatusData.length === 0) return data.metrics;
+    let pending = 0, processing = 0, shipped = 0, delivered = 0, cancelled = 0;
+    for (const row of liveStatusData) {
+      const s = (row.status || "").toLowerCase();
+      const count = Number(row.count) || 0;
+      if (s === "pending" || s === "placed") pending += count;
+      else if (s === "processing" || s === "processed" || s === "received") processing += count;
+      else if (s === "shipped" || s === "out_for_delivery") shipped += count;
+      else if (s === "delivered" || s === "completed") delivered += count;
+      else if (s === "cancelled" || s === "canceled" || s === "refunded") cancelled += count;
+    }
+    const total = pending + processing + shipped + delivered + cancelled;
+    return {
+      ...data.metrics,
+      total,
+      pending,
+      processing,
+      shipped,
+      delivered,
+      cancelled,
+    };
+  }, [data?.metrics, liveStatusData]);
+
   const chartDistribution = useMemo(
     () => (data?.statusDistribution ?? []).map(item => ({ ...item, color: STATUS_COLORS[item.name] })),
     [data]
@@ -192,12 +217,12 @@ export function OrdersOverviewPage({ onNav }: { onNav: (id: string) => void }) {
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
         className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Total Orders" val={data?.metrics.total ?? "—"} color="#3b82f6" icon={ShoppingCart} />
-        <StatCard label="Pending" val={data?.metrics.pending ?? "—"} color="#f59e0b" icon={Clock} />
-        <StatCard label="Processing" val={data?.metrics.processing ?? "—"} color="#6366f1" icon={Package} />
-        <StatCard label="Shipped" val={data?.metrics.shipped ?? "—"} color="#8b5cf6" icon={Truck} />
-        <StatCard label="Delivered" val={data?.metrics.delivered ?? "—"} color={G} icon={CheckCircle2} />
-        <StatCard label="Cancelled" val={data?.metrics.cancelled ?? "—"} color="#ef4444" icon={XCircle} />
+        <StatCard label="Total Orders" val={activeMetrics?.total ?? "—"} color="#3b82f6" icon={ShoppingCart} />
+        <StatCard label="Pending" val={activeMetrics?.pending ?? "—"} color="#f59e0b" icon={Clock} />
+        <StatCard label="Processing" val={activeMetrics?.processing ?? "—"} color="#6366f1" icon={Package} />
+        <StatCard label="Shipped" val={activeMetrics?.shipped ?? "—"} color="#8b5cf6" icon={Truck} />
+        <StatCard label="Delivered" val={activeMetrics?.delivered ?? "—"} color={G} icon={CheckCircle2} />
+        <StatCard label="Cancelled" val={activeMetrics?.cancelled ?? "—"} color="#ef4444" icon={XCircle} />
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}

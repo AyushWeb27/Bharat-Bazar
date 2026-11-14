@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
   }
 
   const sealedQuery = await realtime.seal({
-    query: rawSql`
-      SELECT
+    query: rawSql(
+      `SELECT
         o.id,
         o.order_number,
         o.status,
@@ -23,10 +23,11 @@ export async function GET(req: NextRequest) {
         o.created_at,
         o.updated_at
       FROM customer_orders o
-      WHERE o.user_id = ${userId}
+      WHERE o.user_id = $1
       ORDER BY o.created_at DESC, o.id DESC
-      LIMIT 100
-    `,
+      LIMIT 100`,
+      [userId]
+    ),
   });
   return NextResponse.json({ success: true, sealedQuery });
 }

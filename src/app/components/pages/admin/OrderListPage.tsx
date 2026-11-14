@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
 import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
 import type { SealedLiveQuery } from "@neon/realtime/client";
@@ -158,6 +158,8 @@ export function OrderListPage() {
         .then((j: { sealedQuery: SealedLiveQuery<LiveOrder> }) => j.sealedQuery)
   );
 
+  const prevLiveOrdersCountRef = useRef<number | null>(null);
+
   const loadOrders = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError("");
@@ -196,6 +198,15 @@ export function OrderListPage() {
     void loadOrders(controller.signal);
     return () => controller.abort();
   }, [loadOrders]);
+
+  useEffect(() => {
+    if (liveOrders !== undefined) {
+      if (prevLiveOrdersCountRef.current !== null && prevLiveOrdersCountRef.current !== liveOrders.length) {
+        void loadOrders();
+      }
+      prevLiveOrdersCountRef.current = liveOrders.length;
+    }
+  }, [liveOrders, loadOrders]);
 
   const navItem     = SIDE_NAV.find(n => n.id === activeTab)!;
   const countOf     = (status: OrderStatus | null) => status ? orders.filter(o => o.status === status).length : orders.length;

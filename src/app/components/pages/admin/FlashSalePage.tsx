@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { Clock, Edit2, Package, Percent, Trash2, Zap } from "lucide-react";
+import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
+import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import { DeleteConfirm, Field, Modal, PageHeader, StatCard, Toggle } from "./shared/ui";
 import { G, GD, inp, card } from "./shared/constants";
 
@@ -105,6 +108,15 @@ export function FlashSalePage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [form, setForm] = useState<SaleForm>(EMPTY_FORM);
   const [now, setNow] = useState(Date.now);
+
+  // ── Neon Realtime: Live flash sales ───────────────────────────────────────
+  type LiveFlashSale = { id: number; name: string; discount_type: string; discount_value: string; start_at: string; end_at: string; is_active: boolean };
+  const { status: realtimeStatus } = useRealtimeQuery<LiveFlashSale>(
+    () =>
+      fetch("/api/realtime/flash-sales", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((j: { sealedQuery: SealedLiveQuery<LiveFlashSale> }) => j.sealedQuery)
+  );
 
   const loadData = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/admin/flash-sales", {
@@ -255,7 +267,9 @@ export function FlashSalePage() {
     <div className="space-y-5">
       <PageHeader breadcrumb="Operations / Flash Sales" title="Flash Sales"
         subtitle="Manage time-limited discounts shown on the storefront"
-        count={sales.length} onAdd={openAdd} addLabel="Create Flash Sale" />
+        count={sales.length} onAdd={openAdd} addLabel="Create Flash Sale">
+        <RealtimeBadge status={realtimeStatus} />
+      </PageHeader>
 
       {error && !modal && (
         <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

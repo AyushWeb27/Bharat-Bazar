@@ -6,6 +6,7 @@ import {
   type LiveQuerySnapshot,
   type LiveQueryError,
   type LiveQueryState,
+  type MaterializedLiveQuerySubscription,
 } from "@neon/realtime/client";
 
 export type RealtimeStatus = "connecting" | "live" | "stale" | "error" | "closed";
@@ -31,12 +32,12 @@ export function useRealtimeQuery<T>(
     }
 
     const client = createRealtimeClient({ url });
-    let sub: ReturnType<typeof client.subscribe<T>> | null = null;
+    let sub: MaterializedLiveQuerySubscription<T> | null = null;
 
     async function start() {
       try {
         const sealedQuery = await fetchRef.current();
-        sub = client.subscribe<T>(sealedQuery, { initialData });
+        sub = client.subscribe<T>(sealedQuery, { materialize: true, initialData });
 
         // Listen to snapshot changes (data + status together)
         sub.onChange((snap: LiveQuerySnapshot<T>) => {

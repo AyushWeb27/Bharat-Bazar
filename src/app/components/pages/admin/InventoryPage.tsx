@@ -8,6 +8,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, Legend,
 } from "recharts";
+import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
+import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import { PageHeader, StatCard, SectionCard } from "./shared/ui";
 import { G, fmt, card } from "./shared/constants";
 
@@ -69,6 +72,15 @@ function statusMeta(status: Product["status"]) {
 export function InventoryPage() {
   const [reordering, setReordering] = useState<number | null>(null);
 
+  // ── Neon Realtime: Live inventory stock updates ───────────────────────────
+  type LiveInventoryItem = { id: number; name: string; stock: number; low_stock_alert: number; status: string; category: string };
+  const { status: realtimeStatus } = useRealtimeQuery<LiveInventoryItem>(
+    () =>
+      fetch("/api/realtime/inventory", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((j: { sealedQuery: SealedLiveQuery<LiveInventoryItem> }) => j.sealedQuery)
+  );
+
   const handleReorder = (id: number) => {
     setReordering(id);
     setTimeout(() => setReordering(null), 1500);
@@ -81,7 +93,9 @@ export function InventoryPage() {
         breadcrumb="Operations / Inventory"
         title="Inventory"
         subtitle="Monitor stock levels, alerts and movements"
-      />
+      >
+        <RealtimeBadge status={realtimeStatus} />
+      </PageHeader>
 
       {/* Stat cards */}
       <motion.div

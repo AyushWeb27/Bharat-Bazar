@@ -9,14 +9,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
   const sealedQuery = await realtime.seal({
-    query: rawSql`
-      SELECT
+    query: rawSql(
+      `SELECT
         status,
         COUNT(*)::INT AS count,
         COALESCE(SUM(total_amount), 0)::NUMERIC AS total_amount
       FROM customer_orders
-      GROUP BY status
-    `,
+      GROUP BY status`
+    ),
   });
   return NextResponse.json({ success: true, sealedQuery });
 }

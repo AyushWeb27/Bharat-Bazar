@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
+import { useRealtimeQuery } from "@/hooks/useRealtimeQuery";
+import { RealtimeBadge } from "@/components/realtime/RealtimeBadge";
+import type { SealedLiveQuery } from "@neon/realtime/client";
 import {
   ArrowRight, Check, CheckCircle2, ChevronDown, Clock3, Navigation, Package, Star,
   PackageCheck, RefreshCw, Search, ShoppingBag, Truck, XCircle, CalendarDays, ClipboardCheck,
@@ -247,6 +251,27 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [reviewFeedback, setReviewFeedback] = useState("");
+
+  // ── Neon Realtime: Live customer order updates ────────────────────────────
+  type LiveCustomerOrder = { id: number; order_number: string; status: string; total_amount: string; created_at: string; updated_at: string };
+  const { data: liveCustomerOrders, status: realtimeStatus } = useRealtimeQuery<LiveCustomerOrder>(
+    () =>
+      fetch("/api/realtime/customer-orders", { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((j: { sealedQuery: SealedLiveQuery<LiveCustomerOrder> }) => j.sealedQuery)
+  );
+
+  const prevCustomerOrdersRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (liveCustomerOrders !== undefined) {
+      const signature = liveCustomerOrders.map((o) => `${o.order_number}:${o.status}`).join(",");
+      if (prevCustomerOrdersRef.current !== null && prevCustomerOrdersRef.current !== signature) {
+        toast.info("Your order status has been updated in real-time!");
+        setReload((r) => r + 1);
+      }
+      prevCustomerOrdersRef.current = signature;
+    }
+  }, [liveCustomerOrders]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -538,7 +563,10 @@ export function OrdersPage({ setPage }: { setPage: (p: Page) => void }) {
       <section className="rounded-3xl border border-border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">Order history</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">Order history</p>
+              {!signedOut && <RealtimeBadge status={realtimeStatus} />}
+            </div>
             <h2 className="mt-1 text-xl font-black text-foreground">Your purchases</h2>
           </div>
           <label className="relative block w-full sm:max-w-xs">

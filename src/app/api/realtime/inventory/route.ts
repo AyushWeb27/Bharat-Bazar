@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
   const sealedQuery = await realtime.seal({
-    query: rawSql`
-      SELECT
+    query: rawSql(
+      `SELECT
         id,
         name,
         stock::INT,
@@ -20,8 +20,8 @@ export async function GET(req: NextRequest) {
       FROM admin_products
       WHERE status = 'active'
       ORDER BY stock ASC, name ASC
-      LIMIT 50
-    `,
+      LIMIT 50`
+    ),
   });
   return NextResponse.json({ success: true, sealedQuery });
 }

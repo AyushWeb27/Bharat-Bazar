@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
   }
   const sealedQuery = await realtime.seal({
-    query: rawSql`
-      SELECT
+    query: rawSql(
+      `SELECT
         o.order_number,
         o.status,
         o.total_amount::NUMERIC,
@@ -20,8 +20,8 @@ export async function GET(req: NextRequest) {
       FROM customer_orders o
       JOIN users u ON u.id = o.user_id
       ORDER BY o.created_at DESC
-      LIMIT 100
-    `,
+      LIMIT 100`
+    ),
   });
   return NextResponse.json({ success: true, sealedQuery });
 }
