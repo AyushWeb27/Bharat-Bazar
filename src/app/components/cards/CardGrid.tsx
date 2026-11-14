@@ -112,8 +112,8 @@ export function CardGrid({ p, onAdd, onWish, wished, onView }: {
       <div className="p-4 flex flex-col gap-2 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest truncate">{p.brand}</p>
-            <h3 className="text-sm font-bold text-foreground leading-snug mt-0.5 line-clamp-2">{p.name}</h3>
+            {p.brand ? <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest truncate">{p.brand}</p> : null}
+            <h3 className={`text-sm font-bold text-foreground leading-snug line-clamp-2 ${p.brand ? "mt-0.5" : ""}`}>{p.name}</h3>
           </div>
         </div>
 

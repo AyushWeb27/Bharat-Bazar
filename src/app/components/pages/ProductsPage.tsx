@@ -393,24 +393,24 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
   );
 
   return (
-    <div className="space-y-6">
-      <section className="relative isolate overflow-hidden rounded-[2rem] bg-[#06291d] px-6 py-8 text-white sm:px-9 sm:py-10">
+    <div className="space-y-4">
+      <section className="relative isolate overflow-hidden rounded-[2rem] bg-[#06291d] px-5 py-5 text-white sm:px-8 sm:py-6">
         <div className="absolute -right-14 -top-24 -z-10 h-72 w-72 rounded-full border-[36px] border-emerald-400/10" />
         <div className="absolute -bottom-36 right-28 -z-10 h-72 w-72 rounded-full bg-emerald-500/10 blur-2xl" />
         <div className="relative max-w-2xl">
-          <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-200">
+          <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-emerald-200">
             <Sparkles size={12} /> Bharat Bazar • The everyday marketplace
           </p>
-          <h1 className="text-3xl font-black leading-tight tracking-tight sm:text-5xl">
-            Good finds.<br className="sm:hidden" /> Better prices.
+          <h1 className="text-2xl font-black leading-tight tracking-tight sm:text-3xl">
+            Good finds. Better prices.
           </h1>
-          <p className="mt-3 max-w-lg text-sm leading-6 text-emerald-50/75">
+          <p className="mt-1.5 max-w-lg text-xs leading-5 text-emerald-50/75 sm:text-sm">
             Browse the full collection, discover local favorites, and find exactly what you need.
           </p>
-          <div className="mt-6 flex flex-wrap gap-2">
-            <span className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold">{products.length.toLocaleString("en-IN")} products</span>
-            <span className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold">{categories.filter(item => item.count > 0).length} live aisles</span>
-            <span className="rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-bold">Easy returns • Secure checkout</span>
+          <div className="mt-3.5 flex flex-wrap gap-2">
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold">{products.length.toLocaleString("en-IN")} products</span>
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold">{categories.filter(item => item.count > 0).length} live aisles</span>
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold">Easy returns • Secure checkout</span>
           </div>
         </div>
       </section>
@@ -422,7 +422,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           onChange={event => setSearch(event.target.value)}
           placeholder="Search products, brands, or categories..."
           aria-label="Search products"
-          className="w-full rounded-2xl border border-border bg-card py-3.5 pl-11 pr-11 text-sm text-foreground shadow-sm outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-600/10"
+          className="w-full rounded-2xl border border-border bg-card py-2.5 pl-11 pr-11 text-sm text-foreground shadow-sm outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-600/10"
         />
         {search && (
           <button type="button" onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -436,7 +436,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           <button
             type="button"
             onClick={() => setCategory("All")}
-            className={`shrink-0 rounded-full border px-4 py-2 text-xs font-extrabold transition-colors ${category === "All" ? "border-[#009966] bg-[#009966] text-white" : "border-border bg-card text-muted-foreground hover:border-emerald-600 hover:text-foreground"}`}
+            className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-extrabold transition-colors ${category === "All" ? "border-[#009966] bg-[#009966] text-white" : "border-border bg-card text-muted-foreground hover:border-emerald-600 hover:text-foreground"}`}
           >
             All departments
           </button>
@@ -445,7 +445,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
               type="button"
               key={item.id}
               onClick={() => setCategory(item.name)}
-              className={`shrink-0 rounded-full border px-4 py-2 text-xs font-extrabold transition-colors ${category === item.name ? "border-[#009966] bg-[#009966] text-white" : "border-border bg-card text-muted-foreground hover:border-emerald-600 hover:text-foreground"}`}
+              className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-extrabold transition-colors ${category === item.name ? "border-[#009966] bg-[#009966] text-white" : "border-border bg-card text-muted-foreground hover:border-emerald-600 hover:text-foreground"}`}
             >
               <span className="mr-1.5">{item.emoji}</span>{item.name}
             </button>
@@ -453,7 +453,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
         </div>
       )}
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-start gap-5 sm:gap-6">
         <aside className="hidden w-64 shrink-0 self-start lg:block">
           <div className="sticky top-5 rounded-3xl border border-border bg-card p-5 shadow-sm">
             <div className="mb-5 flex items-center justify-between border-b border-border pb-4">
@@ -467,12 +467,12 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1">
-          <div className="mb-4 flex flex-wrap items-center gap-3">
+        <section className="min-w-0 flex-1 self-start">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setFilterOpen(true)}
-              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-xs font-extrabold text-foreground transition hover:border-emerald-600 lg:hidden"
+              className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-extrabold text-foreground transition hover:border-emerald-600 lg:hidden"
             >
               <SlidersHorizontal size={14} /> Filters
               {activeFilterCount > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#009966] px-1 text-[10px] text-white">{activeFilterCount}</span>}
@@ -492,7 +492,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
                 id="product-sort"
                 value={sort}
                 onChange={event => setSort(event.target.value)}
-                className="max-w-[160px] rounded-xl border border-border bg-card px-3 py-2.5 text-xs font-bold text-foreground outline-none focus:border-emerald-600"
+                className="max-w-[160px] rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-foreground outline-none focus:border-emerald-600"
               >
                 <option value="popular">Most popular</option>
                 <option value="rating">Top rated</option>
@@ -512,7 +512,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           </div>
 
           {activeFilterCount > 0 && (
-            <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               {category !== "All" && <button type="button" onClick={() => setCategory("All")} className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{category}<X size={11} /></button>}
               {brandFilters.map(brand => <button key={brand} type="button" onClick={() => toggleBrand(brand)} className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{brand}<X size={11} /></button>)}
               {(inStockOnly || offersOnly || freeDeliveryOnly || codOnly) && <span className="rounded-full bg-muted px-3 py-1.5 text-[10px] font-bold text-muted-foreground">{[inStockOnly && "In stock", offersOnly && "On sale", freeDeliveryOnly && "Free delivery", codOnly && "COD"].filter(Boolean).join(" · ")}</span>}
