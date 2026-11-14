@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
-import { mapAdminBrand, parseAdminBrandInput, requireActiveBrandAdmin } from "@/lib/brands";
+import { ensureBrandCategoriesColumn, mapAdminBrand, parseAdminBrandInput, requireActiveBrandAdmin } from "@/lib/brands";
 import { deleteBrandImage } from "@/lib/profile-storage";
 
 function unauthorized() {
@@ -14,7 +14,19 @@ function isUniqueViolation(error: unknown) {
 export async function GET(req: NextRequest) {
   try {
     if (!(await requireActiveBrandAdmin(req))) return unauthorized();
-    const rows = await sql`SELECT * FROM admin_brands ORDER BY id ASC`;
+    await ensureBrandCategoriesColumn();
+    const category = req.nextUrl.searchParams.get("category");
+    const trimmedCategory = category ? category.trim() : "";
+    const rows = trimmedCategory
+      ? await sql`
+          SELECT * FROM admin_brands
+          WHERE LOWER(TRIM(category)) = LOWER(TRIM(${trimmedCategory}))
+             OR categories @> ${JSON.stringify([trimmedCategory])}::jsonb
+             OR LOWER(TRIM(category)) = 'all'
+             OR LOWER(TRIM(category)) = 'general'
+          ORDER BY name ASC, id ASC
+        `
+      : await sql`SELECT * FROM admin_brands ORDER BY id ASC`;
     return NextResponse.json({ success: true, brands: rows.map(mapAdminBrand) });
   } catch (error) {
     console.error("GET /api/admin/brands error:", error);
@@ -25,6 +37,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     if (!(await requireActiveBrandAdmin(req))) return unauthorized();
+    await ensureBrandCategoriesColumn();
     let body: unknown;
     try {
       body = await req.json();
@@ -36,9 +49,9 @@ export async function POST(req: NextRequest) {
 
     const rows = await sql`
       INSERT INTO admin_brands
-        (name, slug, category, logo_color, country, country_flag, website, description, featured, active, premium)
+        (name, slug, category, categories, logo_color, country, country_flag, website, description, featured, active, premium)
       VALUES
-        (${input.name}, ${input.slug}, ${input.category}, ${input.logoColor}, ${input.country},
+        (${input.name}, ${input.slug}, ${input.category}, ${JSON.stringify(input.categories)}::jsonb, ${input.logoColor}, ${input.country},
          ${input.countryFlag}, ${input.website}, ${input.description}, ${input.featured}, ${input.active}, ${input.premium})
       RETURNING *
     `;
@@ -55,6 +68,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     if (!(await requireActiveBrandAdmin(req))) return unauthorized();
+    await ensureBrandCategoriesColumn();
     let body: unknown;
     try {
       body = await req.json();
@@ -73,6 +87,7 @@ export async function PUT(req: NextRequest) {
     const rows = await sql`
       UPDATE admin_brands
       SET name = ${input.name}, slug = ${input.slug}, category = ${input.category},
+          categories = ${JSON.stringify(input.categories)}::jsonb,
           logo_color = ${input.logoColor}, country = ${input.country},
           country_flag = ${input.countryFlag}, website = ${input.website}, description = ${input.description},
           featured = ${input.featured}, active = ${input.active}, premium = ${input.premium},

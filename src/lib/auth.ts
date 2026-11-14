@@ -222,14 +222,15 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleTokenP
     }
 
     const data = await res.json();
-    const expectedClientId =
-      process.env.GOOGLE_CLIENT_ID ||
-      process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ||
-      "470811948482-mca375qbpj3pkjjmso3ranuahjqssfpt.apps.googleusercontent.com";
+    const validClientIds = [
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+      "470811948482-mca375qbpj3pkjjmso3ranuahjqssfpt.apps.googleusercontent.com",
+    ].filter(Boolean) as string[];
 
-    // Verify audience matches client ID
-    if (data.aud !== expectedClientId) {
-      console.error("Google token audience mismatch:", data.aud, "vs", expectedClientId);
+    // Verify audience matches any valid client ID
+    if (!validClientIds.includes(data.aud)) {
+      console.error("Google token audience mismatch:", data.aud, "vs", validClientIds);
       return null;
     }
 
@@ -237,13 +238,43 @@ export async function verifyGoogleIdToken(idToken: string): Promise<GoogleTokenP
       sub: data.sub,
       email: data.email,
       email_verified: data.email_verified === "true" || data.email_verified === true,
-      name: data.name || data.email.split("@")[0],
+      name: data.name || data.email?.split("@")[0] || "Seller",
       picture: data.picture || "",
       given_name: data.given_name,
       family_name: data.family_name,
     };
   } catch (err) {
     console.error("Google ID token verification failed:", err);
+    return null;
+  }
+}
+
+export async function verifyGoogleAccessToken(accessToken: string): Promise<GoogleTokenPayload | null> {
+  try {
+    const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      console.error("Google userinfo error status:", res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    if (!data.email) {
+      return null;
+    }
+
+    return {
+      sub: data.sub,
+      email: data.email,
+      email_verified: data.email_verified === true || data.email_verified === "true",
+      name: data.name || data.email?.split("@")[0] || "Seller",
+      picture: data.picture || "",
+      given_name: data.given_name,
+      family_name: data.family_name,
+    };
+  } catch (err) {
+    console.error("Google access token verification failed:", err);
     return null;
   }
 }

@@ -306,6 +306,25 @@ export function SellerRegisterPage({ setPage }: { setPage: (p: Page) => void }) 
     } catch {
       // Ignore parse errors
     }
+
+    // Load pre-filled verified Google email if redirected from Google login
+    try {
+      const googlePrefill = sessionStorage.getItem("seller_google_prefill");
+      if (googlePrefill) {
+        const parsed = JSON.parse(googlePrefill);
+        if (parsed.email) {
+          setForm(prev => ({
+            ...prev,
+            email: parsed.email,
+            ownerName: prev.ownerName || parsed.name || "",
+            emailVerified: true,
+          }));
+        }
+        sessionStorage.removeItem("seller_google_prefill");
+      }
+    } catch {
+      // Ignore parse errors
+    }
   }, []);
 
   // Fetch Primary Business Categories from admin_categories database table

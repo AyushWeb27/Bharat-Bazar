@@ -4,10 +4,9 @@ import {
   Award, CheckCircle2, Globe, ImageIcon, Layers,
   Settings, Upload, Trash2, BadgeCheck, Star,
 } from "lucide-react";
-import { G, toSlug, inp, card } from "./shared/constants";
+import { G, toSlug, inp, card, getBrandCatColor } from "./shared/constants";
 import { SectionCard, Field, PageHeader, Toggle } from "./shared/ui";
-
-type CategoryOption = { id: number; name: string; emoji: string };
+import { CategoryMultiSelect, type CategoryOption } from "./shared/CategoryMultiSelect";
 
 function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: string; logoInit: string; logoUrl?: string; size?: number }) {
   if (logoUrl) {
@@ -29,7 +28,7 @@ function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: str
 export function AddBrandPage() {
   const [name,     setName    ] = useState("");
   const [slug,     setSlug    ] = useState("");
-  const [category, setCategory] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoryError, setCategoryError] = useState("");
@@ -69,7 +68,7 @@ export function AddBrandPage() {
               "emoji" in item && typeof item.emoji === "string")
         );
         setCategories(options);
-        setCategory(current => current || options[0]?.name || "");
+        setSelectedCategories(current => current.length > 0 ? current : (options[0]?.name ? [options[0].name] : []));
       } catch (loadError) {
         if (!controller.signal.aborted) {
           setCategoryError(loadError instanceof Error ? loadError.message : "Failed to load categories.");
@@ -88,8 +87,12 @@ export function AddBrandPage() {
 
   async function handleSave() {
     setError("");
-    if (!name.trim() || !slug.trim() || !categories.some(item => item.name === category)) {
-      setError("Brand name, slug, and a database category are required.");
+    if (!name.trim() || !slug.trim()) {
+      setError("Brand name and slug are required.");
+      return;
+    }
+    if (selectedCategories.length === 0) {
+      setError("Please select at least one category for this brand.");
       return;
     }
     setSaving(true);
@@ -98,8 +101,18 @@ export function AddBrandPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name, slug, category, logoColor, country, countryFlag, website, description: desc,
-          featured, active, premium,
+          name,
+          slug,
+          category: selectedCategories[0],
+          categories: selectedCategories,
+          logoColor,
+          country,
+          countryFlag,
+          website,
+          description: desc,
+          featured,
+          active,
+          premium,
         }),
       });
       const result = await response.json();
@@ -215,10 +228,28 @@ export function AddBrandPage() {
             {/* Live preview */}
             <div className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 bg-gray-50 mt-4">
               <BrandLogo logoColor={logoColor} logoInit={logoInit} logoUrl={logoUrl||undefined} size={56}/>
-              <div>
-                <p className="text-base font-black text-gray-900">{name||"Brand Name"}</p>
-                <p className="text-xs text-gray-400">/{slug||"brand-slug"}</p>
-                <div className="flex items-center gap-1.5 mt-1">
+              <div className="min-w-0 flex-1">
+                <p className="text-base font-black text-gray-900 truncate">{name||"Brand Name"}</p>
+                <p className="text-xs text-gray-400 font-mono">/{slug||"brand-slug"}</p>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {selectedCategories.length > 0 ? (
+                    selectedCategories.map((cat, idx) => (
+                      <span
+                        key={cat}
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                        style={{
+                          background: `${getBrandCatColor(cat)}15`,
+                          color: getBrandCatColor(cat),
+                        }}
+                      >
+                        {cat} {idx === 0 && selectedCategories.length > 1 ? "★ Primary" : ""}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[10px] text-gray-400 italic">No categories selected</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 mt-2">
                   {featured && <span className="flex items-center gap-0.5 text-[10px] font-bold" style={{color:"#f59e0b"}}><Star size={9}/> Featured</span>}
                   {premium  && <span className="flex items-center gap-0.5 text-[10px] font-bold" style={{color:"#8b5cf6"}}><BadgeCheck size={9}/> Premium</span>}
                 </div>
@@ -228,22 +259,16 @@ export function AddBrandPage() {
         </div>
 
         {/* RIGHT */}
-        <div className="w-full xl:w-72 shrink-0 space-y-4">
+        <div className="w-full xl:w-80 shrink-0 space-y-4">
           <SectionCard title="Classification" icon={Layers}>
-            <Field label="Category" required>
-              <select
-                value={category}
-                onChange={e=>setCategory(e.target.value)}
-                className={inp}
-                disabled={categoriesLoading || categories.length === 0}
-              >
-                <option value="">{categoriesLoading ? "Loading categories…" : "Select a category…"}</option>
-                {categories.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
-              </select>
-              {categoryError && <p role="alert" className="mt-1 text-xs text-red-600">{categoryError}</p>}
-              {!categoriesLoading && !categoryError && categories.length === 0 && (
-                <p className="mt-1 text-xs text-amber-700">No categories found in the database.</p>
-              )}
+            <Field label="Categories" required hint="Select 1 or more categories">
+              <CategoryMultiSelect
+                categories={categories}
+                selectedCategories={selectedCategories}
+                onChange={setSelectedCategories}
+                loading={categoriesLoading}
+                error={categoryError}
+              />
             </Field>
             <Field label="Country of Origin">
               <select value={country} onChange={e=>{const c=COUNTRIES.find(x=>x.name===e.target.value);setCountry(e.target.value);setCountryFlag(c?.flag??"🌐");}} className={inp}>

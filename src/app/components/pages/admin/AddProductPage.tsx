@@ -7,7 +7,6 @@ import {
   DollarSign, BarChart3, Layers, Truck, Search as SearchIcon,
   FileText, Info, Star, Eye, ShoppingBag, ListChecks,
 } from "lucide-react";
-import { INIT_BRANDS } from "./shared/data";
 import type { TaxRule } from "./shared/types";
 import { G, GD, fmt, disc, inp } from "./shared/constants";
 import { Field, Toggle } from "./shared/ui";
@@ -104,6 +103,7 @@ function numberText(value: unknown, fallback = "") {
 
 type ProductCategoryOption = { id: number; name: string; slug: string; emoji: string; active: boolean };
 type ProductSubcategoryOption = { id: number; name: string; parent: string; active: boolean };
+type ProductBrandOption = { id: number; name: string; slug: string; category: string; countryFlag?: string; active: boolean };
 
 function isProductCategoryOption(value: unknown): value is ProductCategoryOption {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -118,6 +118,14 @@ function isProductSubcategoryOption(value: unknown): value is ProductSubcategory
   const item = value as Record<string, unknown>;
   return typeof item.id === "number" && typeof item.name === "string" &&
     typeof item.parent === "string" && typeof item.active === "boolean";
+}
+
+function isProductBrandOption(value: unknown): value is ProductBrandOption {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "number" && typeof item.name === "string" &&
+    typeof item.slug === "string" && typeof item.category === "string" &&
+    typeof item.active === "boolean";
 }
 
 const SECTIONS = [
@@ -283,6 +291,9 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoriesError, setCategoriesError] = useState("");
   const [brand, setBrand]         = useState("");
+  const [brands, setBrands]       = useState<ProductBrandOption[]>([]);
+  const [brandsLoading, setBrandsLoading] = useState(false);
+  const [brandsError, setBrandsError] = useState("");
   const [sellerIds, setSellerIds] = useState<number[]>([]);
   const [tags, setTags]           = useState<string[]>([]);
 
@@ -542,6 +553,40 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
   }, []);
 
   useEffect(() => {
+    if (!category) {
+      setBrands([]);
+      setBrandsLoading(false);
+      setBrandsError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    async function loadBrands() {
+      setBrandsLoading(true);
+      setBrandsError("");
+      try {
+        const response = await fetch(`/api/admin/brands?category=${encodeURIComponent(category)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success || !Array.isArray(result.brands)) {
+          throw new Error(typeof result.message === "string" ? result.message : "Failed to load brands.");
+        }
+        setBrands(result.brands.filter(isProductBrandOption));
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setBrandsError(error instanceof Error ? error.message : "Failed to load brands.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setBrandsLoading(false);
+      }
+    }
+    void loadBrands();
+    return () => controller.abort();
+  }, [category]);
+
+  useEffect(() => {
     const controller = new AbortController();
     async function loadTaxRules() {
       setTaxRulesLoading(true);
@@ -591,7 +636,7 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
 
   const autoSku = () => {
     const cat = categories.find(c => c.name === category);
-    const bnd = INIT_BRANDS.find(b => b.name === brand);
+    const bnd = brands.find(b => b.name === brand);
     const slug = name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     setSku(`${cat?.slug?.slice(0,3).toUpperCase() ?? "PRD"}-${bnd?.slug?.slice(0,3).toUpperCase() ?? "GEN"}-${slug || "ITEM"}`.replace(/--/g, "-"));
   };
@@ -1098,12 +1143,19 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                     {categoriesError}
                   </p>
                 )}
+                {brandsError && (
+                  <p role="alert" className="sm:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {brandsError}
+                  </p>
+                )}
                 <Field label="Category" required>
                   <select
                     value={category}
                     onChange={e => {
-                      setCategory(e.target.value);
+                      const nextCategory = e.target.value;
+                      setCategory(nextCategory);
                       setSubcat("");
+                      setBrand("");
                       setTaxRuleId("");
                     }}
                     className={inp}
@@ -1124,7 +1176,9 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                     className={inp}
                     disabled={!category}
                   >
-                    <option value="">Select sub-category…</option>
+                    <option value="">
+                      {!category ? "Select category first…" : "Select sub-category…"}
+                    </option>
                     {subcat && !filteredSubcats.some(item => item.name === subcat) && <option key={`current-${subcat}`} value={subcat}>{subcat}</option>}
                     {filteredSubcats.filter(s => s.active).map(s => (
                       <option key={s.id} value={s.name}>{s.name}</option>
@@ -1132,17 +1186,36 @@ export function AddProductPage({ productId, onCancel }: { productId?: number; on
                   </select>
                 </Field>
 
-                <Field label="Brand" required>
+                <Field
+                  label="Brand"
+                  required
+                  hint={!category ? "Select a category first to see available brands" : undefined}
+                >
                   <select
                     value={brand}
                     onChange={e => setBrand(e.target.value)}
                     className={inp}
+                    disabled={!category || brandsLoading}
                   >
-                    <option value="">Select brand…</option>
-                    {brand && !INIT_BRANDS.some(item => item.name === brand) && <option key={`current-${brand}`} value={brand}>{brand}</option>}
-                    {INIT_BRANDS.filter(b => b.active).map(b => (
-                      <option key={b.id} value={b.name}>{b.name} {b.countryFlag}</option>
-                    ))}
+                    <option value="">
+                      {!category
+                        ? "Select category first…"
+                        : brandsLoading
+                        ? "Loading brands…"
+                        : brands.length === 0
+                        ? "No brands available for this category"
+                        : "Select brand…"}
+                    </option>
+                    {brand && !brands.some(item => item.name === brand) && (
+                      <option key={`current-${brand}`} value={brand}>{brand}</option>
+                    )}
+                    {brands
+                      .filter(b => b.active || b.name === brand)
+                      .map(b => (
+                        <option key={b.id} value={b.name}>
+                          {b.name} {b.countryFlag ? b.countryFlag : ""}
+                        </option>
+                      ))}
                   </select>
                 </Field>
               </div>

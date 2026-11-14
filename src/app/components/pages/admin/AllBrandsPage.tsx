@@ -7,6 +7,7 @@ import {
 import type { Brand } from "./shared/types";
 import { G, toSlug, getBrandCatColor, inp, card } from "./shared/constants";
 import { PageHeader, SearchBar, StatCard, Modal, Field, Toggle, StatusPill, DeleteConfirm } from "./shared/ui";
+import { CategoryMultiSelect, type CategoryOption } from "./shared/CategoryMultiSelect";
 
 function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: string; logoInit: string; logoUrl?: string; size?: number }) {
   if (logoUrl) {
@@ -24,8 +25,6 @@ function BrandLogo({ logoColor, logoInit, logoUrl, size = 40 }: { logoColor: str
     </div>
   );
 }
-
-type CategoryOption = { id: number; name: string; emoji: string };
 
 export function AllBrandsPage() {
   const [brands,    setBrands   ] = useState<Brand[]>([]);
@@ -46,7 +45,7 @@ export function AllBrandsPage() {
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
-    name: "", slug: "", category: "", logoColor: G, logoUrl: "", description: "",
+    name: "", slug: "", category: "", categories: [] as string[], logoColor: G, logoUrl: "", description: "",
     country: "India", countryFlag: "🇮🇳", website: "",
     featured: false, active: true, premium: false,
   });
@@ -79,10 +78,15 @@ export function AllBrandsPage() {
         );
         setCategories(options);
         setCategoryError(options.length ? "" : "No categories found in the database.");
-        setForm(current => ({
-          ...current,
-          category: current.category || options[0]?.name || "",
-        }));
+        setForm(current => {
+          const cat = current.category || options[0]?.name || "";
+          const cats = current.categories && current.categories.length > 0 ? current.categories : (cat ? [cat] : []);
+          return {
+            ...current,
+            category: cat,
+            categories: cats,
+          };
+        });
       })
       .catch(error => {
         if (mounted) {
@@ -104,7 +108,9 @@ export function AllBrandsPage() {
   const filtered = useMemo(() => brands.filter(b => {
     const q = search.toLowerCase();
     const matchQ = !q || b.name.toLowerCase().includes(q) || b.slug.includes(q);
-    const matchC = filterCat === "All" || b.category === filterCat;
+    const matchC = filterCat === "All"
+      || (b.categories && b.categories.some(c => c.toLowerCase() === filterCat.toLowerCase()))
+      || b.category.toLowerCase() === filterCat.toLowerCase();
     const matchS = filterSts === "all"
       || (filterSts === "active"   && b.active)
       || (filterSts === "inactive" && !b.active)
@@ -125,7 +131,22 @@ export function AllBrandsPage() {
     setLogoFile(null);
     setRemoveLogo(false);
     setPageError("");
-    setForm({ name:"",slug:"",category:categories[0]?.name ?? "",logoColor:G,logoUrl:"",description:"",country:"India",countryFlag:"🇮🇳",website:"",featured:false,active:true,premium:false });
+    const defaultCats = categories[0]?.name ? [categories[0].name] : [];
+    setForm({
+      name: "",
+      slug: "",
+      category: defaultCats[0] || "",
+      categories: defaultCats,
+      logoColor: G,
+      logoUrl: "",
+      description: "",
+      country: "India",
+      countryFlag: "🇮🇳",
+      website: "",
+      featured: false,
+      active: true,
+      premium: false,
+    });
     setModalOpen(true);
   }
   function openEdit(b: Brand) {
@@ -133,17 +154,48 @@ export function AllBrandsPage() {
     setLogoFile(null);
     setRemoveLogo(false);
     setPageError("");
-    setForm({ name:b.name,slug:b.slug,category:b.category,logoColor:b.logoColor,logoUrl:b.logoUrl??"",description:b.description??"",country:b.country,countryFlag:b.countryFlag,website:b.website,featured:b.featured,active:b.active,premium:b.premium });
+    const bCats = b.categories && b.categories.length > 0
+      ? b.categories
+      : (b.category ? [b.category] : (categories[0]?.name ? [categories[0].name] : []));
+    setForm({
+      name: b.name,
+      slug: b.slug,
+      category: bCats[0] || b.category,
+      categories: bCats,
+      logoColor: b.logoColor,
+      logoUrl: b.logoUrl ?? "",
+      description: b.description ?? "",
+      country: b.country,
+      countryFlag: b.countryFlag,
+      website: b.website,
+      featured: b.featured,
+      active: b.active,
+      premium: b.premium,
+    });
     setModalOpen(true);
   }
   async function handleSave() {
     setPageError("");
+    if (!form.name.trim() || !form.slug.trim()) {
+      setPageError("Brand name and slug are required.");
+      return;
+    }
+    if (form.categories.length === 0) {
+      setPageError("Please select at least one category for this brand.");
+      return;
+    }
     setSaving(true);
     try {
       const response = await fetch("/api/admin/brands", {
         method: editId === null ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, id: editId, logoUrl: undefined }),
+        body: JSON.stringify({
+          ...form,
+          category: form.categories[0],
+          categories: form.categories,
+          id: editId,
+          logoUrl: undefined,
+        }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Failed to save brand.");
@@ -183,7 +235,15 @@ export function AllBrandsPage() {
       const response = await fetch("/api/admin/brands", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...current, ...updates, id, logoColor: current.logoColor, description: current.description ?? "" }),
+        body: JSON.stringify({
+          ...current,
+          ...updates,
+          id,
+          category: current.category,
+          categories: current.categories || [current.category],
+          logoColor: current.logoColor,
+          description: current.description ?? "",
+        }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Failed to update brand.");
@@ -281,11 +341,26 @@ export function AllBrandsPage() {
                     <BrandLogo logoColor={b.logoColor} logoInit={b.logoInit} logoUrl={b.logoUrl} size={48} />
                   </div>
 
-                  <p className="text-sm font-black text-gray-900 leading-tight mb-1">{b.name}</p>
-                  <p className="text-[10px] font-bold mb-2 px-2 py-0.5 rounded-full inline-block"
-                    style={{ background: `${getBrandCatColor(b.category)}15`, color: getBrandCatColor(b.category) }}>
-                    {b.category}
-                  </p>
+                  <p className="text-sm font-black text-gray-900 leading-tight mb-1.5">{b.name}</p>
+                  <div className="flex flex-wrap justify-center gap-1 mb-2">
+                    {(b.categories && b.categories.length > 0 ? b.categories : [b.category]).slice(0, 3).map((cat) => (
+                      <span
+                        key={cat}
+                        className="text-[9px] font-bold px-2 py-0.5 rounded-full inline-block"
+                        style={{ background: `${getBrandCatColor(cat)}15`, color: getBrandCatColor(cat) }}
+                      >
+                        {cat}
+                      </span>
+                    ))}
+                    {b.categories && b.categories.length > 3 && (
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600"
+                        title={b.categories.slice(3).join(", ")}
+                      >
+                        +{b.categories.length - 3}
+                      </span>
+                    )}
+                  </div>
 
                   <div className="flex items-center justify-between text-[10px] text-gray-400 mt-2 pt-2 border-t border-gray-100">
                     <span className="flex items-center gap-0.5">{b.countryFlag} {b.country.split(" ")[0]}</span>
@@ -330,10 +405,17 @@ export function AllBrandsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-                        style={{ background: `${getBrandCatColor(b.category)}15`, color: getBrandCatColor(b.category) }}>
-                        {b.category}
-                      </span>
+                      <div className="flex flex-wrap gap-1 max-w-[220px]">
+                        {(b.categories && b.categories.length > 0 ? b.categories : [b.category]).map(cat => (
+                          <span
+                            key={cat}
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                            style={{ background: `${getBrandCatColor(cat)}15`, color: getBrandCatColor(cat) }}
+                          >
+                            {cat}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3"><span className="text-xs text-gray-500 whitespace-nowrap">{b.countryFlag} {b.country}</span></td>
                     <td className="px-4 py-3">
@@ -381,18 +463,17 @@ export function AllBrandsPage() {
           <Field label="Slug">
             <input value={form.slug} onChange={e=>setForm(f=>({...f,slug:toSlug(e.target.value)}))} placeholder="apple" className={`${inp} font-mono text-[13px]`}/>
           </Field>
-          <Field label="Category" required>
-            <select
-              value={form.category}
-              onChange={e=>setForm(f=>({...f,category:e.target.value}))}
-              className={inp}
-              disabled={categoriesLoading || categories.length === 0}
-            >
-              <option value="">{categoriesLoading ? "Loading categories…" : "Select a category…"}</option>
-              {categories.map(c=><option key={c.id} value={c.name}>{c.emoji} {c.name}</option>)}
-            </select>
-            {categoryError && <p role="alert" className="mt-1 text-xs text-red-600">{categoryError}</p>}
-          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Categories" required hint="Select 1 or more categories (first is primary)">
+              <CategoryMultiSelect
+                categories={categories}
+                selectedCategories={form.categories}
+                onChange={cats => setForm(f => ({ ...f, categories: cats, category: cats[0] || "" }))}
+                loading={categoriesLoading}
+                error={categoryError}
+              />
+            </Field>
+          </div>
           <Field label="Country of Origin">
             <select value={form.country} onChange={e=>{const found=COUNTRIES.find(x=>x.name===e.target.value);setForm(f=>({...f,country:e.target.value,countryFlag:found?found.flag:"🌐"}))}} className={inp}>
               {COUNTRIES.map(c=>(

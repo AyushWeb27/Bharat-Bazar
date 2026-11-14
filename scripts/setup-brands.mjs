@@ -34,6 +34,7 @@ async function setupBrands() {
     )
   `;
   await sql`ALTER TABLE admin_brands ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE admin_brands ADD COLUMN IF NOT EXISTS categories JSONB NOT NULL DEFAULT '[]'::jsonb`;
   await sql`CREATE INDEX IF NOT EXISTS admin_brands_category_idx ON admin_brands (category)`;
   await sql`CREATE INDEX IF NOT EXISTS admin_brands_status_idx ON admin_brands (active, featured, premium)`;
 
@@ -61,9 +62,9 @@ async function setupBrands() {
   for (const [name, slug, category, color, country, flag, website, products, featured, active, premium] of seeds) {
     await sql`
       INSERT INTO admin_brands
-        (name, slug, category, logo_color, country, country_flag, website, products, featured, active, premium)
+        (name, slug, category, categories, logo_color, country, country_flag, website, products, featured, active, premium)
       VALUES
-        (${name}, ${slug}, ${category}, ${color}, ${country}, ${flag}, ${website}, ${products}, ${featured}, ${active}, ${premium})
+        (${name}, ${slug}, ${category}, ${JSON.stringify([category])}::jsonb, ${color}, ${country}, ${flag}, ${website}, ${products}, ${featured}, ${active}, ${premium})
       ON CONFLICT (slug) DO NOTHING
     `;
   }

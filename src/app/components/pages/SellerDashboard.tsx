@@ -7,7 +7,7 @@ import {
   Bell, Search, Menu, X, LogOut, ChevronDown,
   PanelLeftClose, PanelLeftOpen, ShoppingBag,
   UserCheck, MessageSquare, Banknote,
-  Lock, ShieldAlert, Clock, ArrowRight,
+  Lock, ShieldAlert, Clock, ArrowRight, CheckCircle2, BadgeCheck,
 } from "lucide-react";
 
 import { SellerDashboardPage }        from "./seller/DashboardPage";
@@ -163,6 +163,9 @@ type SellerInfo = {
   sellerInitials: string;
   logoUrl?: string;
   status: string;
+  kycStatus?: string;
+  isVerified: boolean;
+  isUnderReview: boolean;
 };
 
 // ── SIDEBAR ────────────────────────────────────────────────────────────────────
@@ -240,14 +243,31 @@ function SidebarInner({
       <div className={`shrink-0 border-t border-white/10 ${collapsed ? "p-2 space-y-2" : "p-3 space-y-2"}`}>
         {!collapsed ? (
           <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5">
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0"
-              style={{ background: S }}
-            >
-              {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
+            <div className="relative shrink-0">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0 overflow-hidden"
+                style={{ background: S }}
+              >
+                {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
+              </div>
+              {sellerInfo.isVerified && (
+                <div
+                  className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border border-[#0d1117] flex items-center justify-center text-white"
+                  title="Verified Seller"
+                >
+                  <CheckCircle2 size={9} strokeWidth={3} />
+                </div>
+              )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-white truncate">{sellerInfo.storeName}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-bold text-white truncate">{sellerInfo.storeName}</p>
+                {sellerInfo.isVerified && (
+                  <span className="text-[9px] font-bold text-emerald-400 shrink-0 flex items-center gap-0.5">
+                    <CheckCircle2 size={9} /> Verified
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-white/35 truncate">{sellerInfo.sellerEmail}</p>
             </div>
             <button
@@ -262,14 +282,19 @@ function SidebarInner({
           <div className="relative group flex justify-center">
             <button
               onClick={onSignOut}
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white"
+              className="relative w-9 h-9 rounded-xl flex items-center justify-center text-[10px] font-black text-white"
               style={{ background: S }}
             >
               {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
+              {sellerInfo.isVerified && (
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border border-[#0d1117] flex items-center justify-center text-white">
+                  <CheckCircle2 size={8} strokeWidth={3} />
+                </div>
+              )}
             </button>
             <div className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="bg-gray-900 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-xl">
-                Sign Out
+                Sign Out {sellerInfo.isVerified ? "• Verified" : ""}
               </div>
             </div>
           </div>
@@ -301,6 +326,10 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
     store_name?: string;
     store_logo_url?: string;
     status?: string;
+    kyc_status?: string;
+    kyc_rejection_reason?: string;
+    business_name?: string;
+    business_category?: string;
   } | null>(null);
 
   const checkAuth = () => {
@@ -340,8 +369,16 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
     .slice(0, 2)
     .map(w => w[0]?.toUpperCase() || "")
     .join("") || "BB";
-  const sellerStatus = currentSeller?.status || "active";
+  const sellerStatus = currentSeller?.status || "Pending Verification";
+  const sellerKycStatus = currentSeller?.kyc_status || "Pending";
   const sellerLogoUrl = currentSeller?.store_logo_url;
+
+  // Normalized database status flags
+  const rawStatus = (currentSeller?.status || "").trim().toLowerCase();
+  const rawKyc = (currentSeller?.kyc_status || "").trim().toLowerCase();
+  const isVerified = rawStatus === "active" || rawStatus === "approved" || rawKyc === "approved";
+  const isUnderReview = !isVerified && (rawStatus === "under review" || rawStatus === "pending verification" || rawStatus === "pending" || rawKyc === "under review" || rawKyc === "pending");
+  const isRejected = !isVerified && (rawStatus === "rejected" || rawKyc === "rejected");
 
   const sellerInfo: SellerInfo = {
     storeName: sellerStoreName,
@@ -349,6 +386,9 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
     sellerInitials,
     logoUrl: sellerLogoUrl,
     status: sellerStatus,
+    kycStatus: sellerKycStatus,
+    isVerified,
+    isUnderReview,
   };
 
   const sidebarW = sidebarCollapsed ? 64 : 240;
@@ -374,12 +414,12 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
 
   function renderPage() {
     switch (activeNav) {
-      case "dashboard":              return <SellerDashboardPage onNav={setActiveNav} />;
+      case "dashboard":              return <SellerDashboardPage onNav={setActiveNav} seller={currentSeller} isVerified={isVerified} />;
       case "orders":                 return <SellerOrdersPage />;
       case "pos-orders":             return <SellerPOSOrdersPage />;
       case "category":               return <SellerCategoryPage />;
       case "sub-category":           return <SellerSubCategoryPage />;
-      case "add-product":            return <SellerAddProductPage />;
+      case "add-product":            return <SellerAddProductPage isVerified={isVerified} />;
       case "bulk-import":            return <SellerBulkImportPage />;
       case "bulk-update":            return <SellerBulkUpdatePage />;
       case "taxes":                  return <SellerTaxesPage />;
@@ -396,7 +436,7 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
       case "customer-messages":      return <CustomerMessagesPage />;
       case "bank-account":           return <BankAccountPage />;
       case "invoices":               return <InvoicePage />;
-      default:                       return <SellerDashboardPage onNav={setActiveNav} />;
+      default:                       return <SellerDashboardPage onNav={setActiveNav} seller={currentSeller} isVerified={isVerified} />;
     }
   }
 
@@ -571,17 +611,43 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
             <div className="relative shrink-0 z-50 pl-2 border-l border-gray-200">
               <button
                 onClick={() => { setProfileOpen(v => !v); setNotifOpen(false); }}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-gray-50 transition-all"
+                className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl hover:bg-gray-50 transition-all cursor-pointer"
               >
-                <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0"
-                  style={{ background: S }}
-                >
-                  {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
+                <div className="relative">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 overflow-hidden shadow-sm"
+                    style={{ background: S }}
+                  >
+                    {sellerInfo.logoUrl ? (
+                      <img src={sellerInfo.logoUrl} alt={sellerInfo.storeName} className="w-full h-full object-cover rounded-xl" />
+                    ) : (
+                      sellerInfo.sellerInitials
+                    )}
+                  </div>
+                  {isVerified && (
+                    <div
+                      className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center text-white shadow-sm"
+                      title="Verified Merchant Account"
+                    >
+                      <CheckCircle2 size={10} strokeWidth={3} />
+                    </div>
+                  )}
                 </div>
                 <div className="hidden md:block text-left">
                   <p className="text-xs font-bold text-gray-900 whitespace-nowrap leading-tight">{sellerInfo.storeName}</p>
-                  <p className="text-[10px] text-gray-400 whitespace-nowrap leading-tight">seller portal</p>
+                  {isVerified ? (
+                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-0.5 leading-tight">
+                      <CheckCircle2 size={10} className="text-emerald-500" />
+                      Verified Seller
+                    </span>
+                  ) : isUnderReview ? (
+                    <span className="text-[10px] font-bold text-amber-600 flex items-center gap-0.5 leading-tight">
+                      <Clock size={10} className="text-amber-500" />
+                      Under Review
+                    </span>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 whitespace-nowrap leading-tight">seller portal</p>
+                  )}
                 </div>
                 <motion.span
                   animate={{ rotate: profileOpen ? 180 : 0 }}
@@ -599,30 +665,70 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 6, scale: 0.96 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-14 w-56 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[70] overflow-hidden"
+                    className="absolute right-0 top-14 w-60 rounded-2xl border border-gray-200 bg-white shadow-2xl z-[70] overflow-hidden"
                   >
                     <div className="px-4 pt-4 pb-3 border-b border-gray-100" style={{ background: `${S}08` }}>
                       <div className="flex items-center gap-3">
-                        <div
-                          className="w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black text-white shrink-0"
-                          style={{ background: S }}
-                        >
-                          {sellerInfo.logoUrl ? <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-lg" /> : sellerInfo.sellerInitials}
+                        <div className="relative">
+                          <div
+                            className="w-11 h-11 rounded-2xl flex items-center justify-center text-sm font-black text-white shrink-0 overflow-hidden shadow-sm"
+                            style={{ background: S }}
+                          >
+                            {sellerInfo.logoUrl ? (
+                              <img src={sellerInfo.logoUrl} alt="" className="w-full h-full object-cover rounded-2xl" />
+                            ) : (
+                              sellerInfo.sellerInitials
+                            )}
+                          </div>
+                          {isVerified && (
+                            <div
+                              className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center text-white shadow-sm"
+                              title="Verified Seller"
+                            >
+                              <CheckCircle2 size={10} strokeWidth={3} />
+                            </div>
+                          )}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-black text-gray-900 truncate">{sellerInfo.storeName}</p>
-                          <span
-                            className="inline-flex items-center gap-1 mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full"
-                            style={{ background: sellerInfo.status === "active" ? `${S}20` : "#fef3c7", color: sellerInfo.status === "active" ? S : "#d97706" }}>
-                            ● {sellerInfo.status === "active" ? "Verified Seller" : "Pending Review"}
-                          </span>
+                          <p className="text-[10px] text-gray-500 truncate">{sellerInfo.sellerEmail}</p>
+                          <div className="mt-1">
+                            {isVerified ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 size={10} className="text-emerald-600" /> Verified Seller
+                              </span>
+                            ) : isUnderReview ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                <Clock size={10} className="text-amber-600" /> Pending Review
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                                ● Pending Verification
+                              </span>
+                            )}
+                          </div>
                         </div>
+                      </div>
+                      <div className="mt-2.5 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500">Database Status:</span>
+                        <span className={`font-black uppercase tracking-wide text-[10px] ${
+                          isVerified ? "text-emerald-600" : isUnderReview ? "text-amber-600" : "text-gray-600"
+                        }`}>
+                          {isVerified ? "Verified (Active)" : currentSeller?.kyc_status || "Under Review"}
+                        </span>
                       </div>
                     </div>
                     <div className="py-1.5">
                       <button
+                        onClick={() => { setActiveNav("kyc"); setProfileOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <UserCheck size={14} className="text-gray-500" />
+                        KYC &amp; Verification
+                      </button>
+                      <button
                         onClick={() => { handleSignOut(); setProfileOpen(false); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors"
+                        className="w-full flex items-center gap-3 px-4 py-2 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors"
                       >
                         <LogOut size={14} />
                         Sign Out
@@ -636,8 +742,31 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          {currentSeller?.status && currentSeller.status !== "active" && (
+        <main className="flex-1 p-4 md:p-6">
+          {/* Real-time KYC / Review Status Banner based directly on database */}
+          {isRejected ? (
+            <div className="mb-6 p-4 rounded-2xl bg-red-50 border border-red-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-red-900">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0 text-red-700">
+                  <ShieldAlert size={20} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-red-800">
+                    KYC Verification Action Required
+                  </h4>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    {currentSeller?.kyc_rejection_reason || "Your KYC documents require correction before your merchant store can go live."}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveNav("kyc")}
+                className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold whitespace-nowrap transition-colors"
+              >
+                Fix &amp; Re-upload Documents
+              </button>
+            </div>
+          ) : !isVerified ? (
             <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0 text-amber-700">
@@ -659,7 +788,7 @@ export function SellerDashboard({ setPage }: { setPage: (p: any) => void }) {
                 View KYC Status
               </button>
             </div>
-          )}
+          ) : null}
           {renderPage()}
         </main>
       </div>

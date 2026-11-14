@@ -18,6 +18,7 @@ type StoreBrand = {
   name: string;
   slug: string;
   category: string;
+  categories?: string[];
   logoColor: string;
   logoInit: string;
   logoUrl: string;
@@ -32,6 +33,7 @@ function isStoreBrand(value: unknown): value is StoreBrand {
     typeof brand.name === "string" &&
     typeof brand.slug === "string" &&
     typeof brand.category === "string" &&
+    (brand.categories === undefined || Array.isArray(brand.categories)) &&
     typeof brand.logoColor === "string" &&
     typeof brand.logoInit === "string" &&
     typeof brand.logoUrl === "string" &&
@@ -91,17 +93,29 @@ export function BrandDirectoryPage() {
   }, [retry]);
 
   const categories = useMemo(
-    () => ["All brands", ...Array.from(new Set(brands.map(brand => brand.category))).sort()],
+    () => [
+      "All brands",
+      ...Array.from(
+        new Set(
+          brands.flatMap(brand =>
+            brand.categories && brand.categories.length > 0 ? brand.categories : [brand.category]
+          )
+        )
+      ).sort(),
+    ],
     [brands]
   );
   const filteredBrands = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    return brands.filter(brand =>
-      (selectedCategory === "All brands" || brand.category === selectedCategory) &&
-      (!query ||
+    return brands.filter(brand => {
+      const brandCats = brand.categories && brand.categories.length > 0 ? brand.categories : [brand.category];
+      const matchCat = selectedCategory === "All brands" || brandCats.includes(selectedCategory);
+      const matchQuery =
+        !query ||
         brand.name.toLocaleLowerCase().includes(query) ||
-        brand.category.toLocaleLowerCase().includes(query))
-    );
+        brandCats.some(c => c.toLocaleLowerCase().includes(query));
+      return matchCat && matchQuery;
+    });
   }, [brands, search, selectedCategory]);
   const featuredBrands = brands.filter(brand => brand.featured);
 
@@ -298,7 +312,9 @@ export function BrandDirectoryPage() {
                       {brand.countryFlag && <span className="mr-1" aria-hidden="true">{brand.countryFlag}</span>}
                       {brand.name}
                     </span>
-                    <span className="mt-1 block truncate text-[10px] font-semibold text-muted-foreground">{brand.category}</span>
+                    <span className="mt-1 block truncate text-[10px] font-semibold text-muted-foreground">
+                      {(brand.categories && brand.categories.length > 0 ? brand.categories : [brand.category]).join(" · ")}
+                    </span>
                   </span>
                   <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors group-hover:bg-[#009966] group-hover:text-white">
                     <ArrowRight size={13} />

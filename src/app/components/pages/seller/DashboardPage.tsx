@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   IndianRupee, ShoppingCart, Monitor, Package, RotateCcw, Star,
   TrendingUp, TrendingDown, Plus, Eye, AlertTriangle, RefreshCw,
-  CheckCircle2, BadgeCheck,
+  CheckCircle2, BadgeCheck, Clock,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -110,7 +110,15 @@ function LiveDot() {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function SellerDashboardPage({ onNav }: { onNav: (id: string) => void }) {
+export function SellerDashboardPage({
+  onNav,
+  seller,
+  isVerified = true,
+}: {
+  onNav: (id: string) => void;
+  seller?: any;
+  isVerified?: boolean;
+}) {
   const [_tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -136,16 +144,32 @@ export function SellerDashboardPage({ onNav }: { onNav: (id: string) => void }) 
         <div className="relative px-6 py-6 md:px-8 md:py-8">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
             <div>
-              <LiveDot />
+              {isVerified ? (
+                <LiveDot />
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-xs font-semibold text-amber-300">Under Review</span>
+                </span>
+              )}
               <h1 className="mt-3 text-2xl md:text-3xl font-black text-white">
-                Good morning, Ravi! 👋
+                Good morning, {seller?.owner_name || "Merchant"}! 👋
               </h1>
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-sm text-white/60 font-medium">Ravi Electro Hub</span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: "rgba(0,153,102,0.28)", color: "#4ade80" }}>
-                  <BadgeCheck size={11} /> Verified Seller
+                <span className="text-sm text-white/60 font-medium">
+                  {seller?.store_name || "Merchant Store"}
                 </span>
+                {isVerified ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: "rgba(0,153,102,0.28)", color: "#4ade80" }}>
+                    <BadgeCheck size={11} /> Verified Seller
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: "rgba(245,158,11,0.25)", color: "#fcd34d" }}>
+                    <Clock size={11} /> Verification In Progress
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-6 mt-5">
                 {[
