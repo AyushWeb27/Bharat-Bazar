@@ -87,10 +87,7 @@ export async function GET(req: NextRequest) {
       ORDER BY p.is_popular DESC, p.featured DESC, p.created_at DESC, p.id DESC
     `;
 
-    return NextResponse.json(
-      {
-        success: true,
-        products: rows.map(row => {
+    const products = rows.map(row => {
           const id = Number(row.id);
           const details = record(row.details);
           const shipping = record(details.shipping);
@@ -194,7 +191,25 @@ export async function GET(req: NextRequest) {
             warranty: typeof details.warranty === "string" ? details.warranty : "",
             deliveryDays: typeof shipping.delivery === "string" ? shipping.delivery : "",
           };
-        }),
+        });
+
+    const highestProductPrice = products.length > 0
+      ? Math.ceil(products.reduce((max, item) => Math.max(max, item.price), 0))
+      : 0;
+    const lowestProductPrice = 0;
+
+    return NextResponse.json(
+      {
+        success: true,
+        products,
+        highestPrice: highestProductPrice,
+        minPrice: lowestProductPrice,
+        maxPrice: highestProductPrice,
+        priceRange: {
+          min: lowestProductPrice,
+          max: highestProductPrice,
+          highestPrice: highestProductPrice,
+        },
       },
       { headers: { "Cache-Control": "no-store" } }
     );

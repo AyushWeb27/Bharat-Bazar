@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowDownWideNarrow,
@@ -101,8 +101,14 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
   const [subcategory, setSubcategory] = useState("All");
   const [search, setSearch] = useState("");
   const [brandFilters, setBrandFilters] = useState<string[]>([]);
+  const [dbPriceRange, setDbPriceRange] = useState<{ min: number; max: number; highestPrice: number }>({
+    min: 0,
+    max: 1000,
+    highestPrice: 1000,
+  });
   const [minPrice, setMinPrice] = useState(0);
-  const [maxPrice, setMaxPrice] = useState(9999999);
+  const [maxPrice, setMaxPrice] = useState(1000);
+  const hasInitializedPriceRef = useRef(false);
   const [inStockOnly, setInStockOnly] = useState(false);
   const [offersOnly, setOffersOnly] = useState(false);
   const [freeDeliveryOnly, setFreeDeliveryOnly] = useState(false);
@@ -116,14 +122,23 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
       setLoading(true);
       setError("");
       try {
-        const [productResponse, categoryResponse] = await Promise.all([
+        const [productResponse, categoryResponse, priceRangeResponse] = await Promise.all([
           fetch("/api/products", { cache: "no-store", signal: controller.signal }),
           fetch("/api/categories", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/products/price-range", { cache: "no-store", signal: controller.signal }).catch(() => null),
         ]);
         const [productResult, categoryResult]: [unknown, unknown] = await Promise.all([
           productResponse.json(),
           categoryResponse.json(),
         ]);
+        let priceRangeResult: Record<string, unknown> | null = null;
+        if (priceRangeResponse && priceRangeResponse.ok) {
+          try {
+            priceRangeResult = await priceRangeResponse.json();
+          } catch {
+            priceRangeResult = null;
+          }
+        }
 
         if (
           !productResponse.ok ||
@@ -150,8 +165,41 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           throw new Error(responseMessage(categoryResult, "Could not load product categories."));
         }
 
+        let dbMax = 0;
+        let dbMin = 0;
+
+        if (priceRangeResult && typeof priceRangeResult === "object") {
+          if (typeof priceRangeResult.highestPrice === "number") dbMax = priceRangeResult.highestPrice;
+          else if (typeof priceRangeResult.highestProductPrice === "number") dbMax = priceRangeResult.highestProductPrice;
+          else if (typeof priceRangeResult.maxPrice === "number") dbMax = priceRangeResult.maxPrice;
+
+          if (typeof priceRangeResult.minPrice === "number") dbMin = priceRangeResult.minPrice;
+        }
+
+        if (!dbMax && productResult && typeof productResult === "object") {
+          const prRecord = productResult as Record<string, unknown>;
+          if (typeof prRecord.highestPrice === "number") dbMax = prRecord.highestPrice;
+          else if (typeof prRecord.maxPrice === "number") dbMax = prRecord.maxPrice;
+
+          if (typeof prRecord.minPrice === "number") dbMin = prRecord.minPrice;
+        }
+
+        const calculatedMax = productResult.products.reduce((highest: number, product: Prod) => Math.max(highest, product.price), 0);
+        const resolvedMax = Math.max(dbMax, calculatedMax, 1000);
+        const resolvedMin = 0;
+
+        setDbPriceRange({ min: 0, max: resolvedMax, highestPrice: resolvedMax });
         setProducts(productResult.products);
         setCategories(categoryResult.categories);
+
+        if (!hasInitializedPriceRef.current) {
+          setMinPrice(0);
+          setMaxPrice(resolvedMax);
+          hasInitializedPriceRef.current = true;
+        } else {
+          setMinPrice(current => Math.max(0, Math.min(current, resolvedMax)));
+          setMaxPrice(current => Math.min(resolvedMax, Math.max(current, 0)));
+        }
       } catch (loadError) {
         if (loadError instanceof Error && loadError.name === "AbortError") return;
         setError(loadError instanceof Error ? loadError.message : "Could not load the product catalog.");
@@ -176,7 +224,36 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
     });
     return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [products]);
-  const catalogMax = Math.max(1000, products.reduce((highest, product) => Math.max(highest, product.price), 0));
+
+  const catalogMax = Math.max(dbPriceRange.highestPrice, products.reduce((highest, product) => Math.max(highest, product.price), 0), 1000);
+  const catalogMin = 0;
+  const isPriceFiltered = minPrice > 0 || maxPrice < catalogMax;
+
+  const pricePresets = useMemo(() => {
+    const presets: Array<{ label: string; min: number; max: number }> = [];
+    presets.push({ label: `All (₹0 – ${formatPrice(catalogMax)})`, min: 0, max: catalogMax });
+    if (catalogMax >= 500) {
+      presets.push({ label: "₹0 – ₹500", min: 0, max: 500 });
+    }
+    if (catalogMax >= 1000) {
+      presets.push({ label: "₹0 – ₹1,000", min: 0, max: 1000 });
+    }
+    if (catalogMax >= 3000) {
+      presets.push({ label: "₹0 – ₹3,000", min: 0, max: 3000 });
+    }
+    if (catalogMax >= 5000) {
+      presets.push({ label: "₹0 – ₹5,000", min: 0, max: 5000 });
+    }
+    if (catalogMax > 5000) {
+      presets.push({ label: `₹5,000 – ${formatPrice(catalogMax)}`, min: 5000, max: catalogMax });
+    }
+    return presets;
+  }, [catalogMax]);
+
+  const resetPrice = () => {
+    setMinPrice(0);
+    setMaxPrice(catalogMax);
+  };
 
   const visibleProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -206,7 +283,7 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
     Number(category !== "All") +
     Number(subcategory !== "All") +
     Number(brandFilters.length > 0) +
-    Number(minPrice > 0 || maxPrice < 9999999) +
+    Number(isPriceFiltered) +
     Number(inStockOnly) +
     Number(offersOnly) +
     Number(freeDeliveryOnly) +
@@ -216,8 +293,8 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
     setCategory("All");
     setSubcategory("All");
     setBrandFilters([]);
-    setMinPrice(0);
-    setMaxPrice(9999999);
+    setMinPrice(catalogMin);
+    setMaxPrice(catalogMax);
     setInStockOnly(false);
     setOffersOnly(false);
     setFreeDeliveryOnly(false);
@@ -293,14 +370,93 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
       <section>
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-[11px] font-black uppercase tracking-[0.16em] text-foreground">Price range</h2>
-            <p className="mt-1 text-[10px] text-muted-foreground">{formatPrice(minPrice)} – {formatPrice(Math.min(maxPrice, catalogMax))}</p>
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-[11px] font-black uppercase tracking-[0.16em] text-foreground">Price range</h2>
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-extrabold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                ₹0 to {formatPrice(catalogMax)}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] font-semibold text-foreground">
+              {isPriceFiltered ? (
+                <>
+                  <span className="text-emerald-700 dark:text-emerald-400">{formatPrice(minPrice)} – {formatPrice(maxPrice)}</span>
+                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">(Range: ₹0 to {formatPrice(catalogMax)})</span>
+                </>
+              ) : (
+                <span className="text-muted-foreground">₹0 to {formatPrice(catalogMax)}</span>
+              )}
+            </p>
           </div>
-          <span className="font-bold" style={{ color: G }}>₹</span>
+          {isPriceFiltered ? (
+            <button
+              type="button"
+              onClick={resetPrice}
+              className="text-[10px] font-bold text-emerald-700 hover:underline dark:text-emerald-400"
+            >
+              Reset
+            </button>
+          ) : (
+            <span className="font-bold text-[#009966]">₹</span>
+          )}
         </div>
-        <div className="space-y-4">
+
+        {/* Visual 0 to Highest Price Bar */}
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-bold text-foreground">
+          <div className="flex flex-col">
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Min</span>
+            <span className="text-emerald-700 dark:text-emerald-400">₹0</span>
+          </div>
+          <div className="h-4 w-px bg-border" />
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Selected Range</span>
+            <span>{formatPrice(minPrice)} – {formatPrice(maxPrice)}</span>
+          </div>
+          <div className="h-4 w-px bg-border" />
+          <div className="flex flex-col items-end">
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Highest Price</span>
+            <span className="text-emerald-700 dark:text-emerald-400">{formatPrice(catalogMax)}</span>
+          </div>
+        </div>
+
+        {/* Dual numeric inputs */}
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold text-muted-foreground">Min (Starts ₹0)</label>
+            <input
+              type="number"
+              min={0}
+              max={maxPrice}
+              value={minPrice}
+              onChange={event => {
+                const val = Number(event.target.value);
+                if (!Number.isNaN(val)) setMinPrice(Math.max(0, Math.min(val, maxPrice)));
+              }}
+              className="w-full rounded-xl border border-border bg-card px-2.5 py-1.5 text-xs font-bold text-foreground outline-none focus:border-emerald-600"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold text-muted-foreground">Max (Up to {formatPrice(catalogMax)})</label>
+            <input
+              type="number"
+              min={minPrice}
+              max={catalogMax}
+              value={maxPrice}
+              onChange={event => {
+                const val = Number(event.target.value);
+                if (!Number.isNaN(val)) setMaxPrice(Math.min(catalogMax, Math.max(val, minPrice)));
+              }}
+              className="w-full rounded-xl border border-border bg-card px-2.5 py-1.5 text-xs font-bold text-foreground outline-none focus:border-emerald-600"
+            />
+          </div>
+        </div>
+
+        {/* Dual range sliders */}
+        <div className="space-y-3">
           <label className="block text-[10px] font-semibold text-muted-foreground">
-            Minimum price
+            <span className="mb-1 flex items-center justify-between">
+              <span>Min slider (from ₹0)</span>
+              <span className="font-bold text-foreground">{formatPrice(minPrice)}</span>
+            </span>
             <input
               type="range"
               min={0}
@@ -308,11 +464,14 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
               step={Math.max(1, Math.round(catalogMax / 200))}
               value={Math.min(minPrice, catalogMax)}
               onChange={event => setMinPrice(Math.min(Number(event.target.value), maxPrice))}
-              className="mt-2 w-full accent-[#009966]"
+              className="w-full accent-[#009966]"
             />
           </label>
           <label className="block text-[10px] font-semibold text-muted-foreground">
-            Maximum price
+            <span className="mb-1 flex items-center justify-between">
+              <span>Max slider (up to {formatPrice(catalogMax)})</span>
+              <span className="font-bold text-foreground">{formatPrice(maxPrice)}</span>
+            </span>
             <input
               type="range"
               min={0}
@@ -320,10 +479,39 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
               step={Math.max(1, Math.round(catalogMax / 200))}
               value={Math.min(maxPrice, catalogMax)}
               onChange={event => setMaxPrice(Math.max(Number(event.target.value), minPrice))}
-              className="mt-2 w-full accent-[#009966]"
+              className="w-full accent-[#009966]"
             />
           </label>
         </div>
+
+        {/* Quick price presets */}
+        {pricePresets.length > 0 && (
+          <div className="mt-3.5 pt-2">
+            <p className="mb-2 text-[10px] font-bold text-muted-foreground">Quick price filters</p>
+            <div className="flex flex-wrap gap-1.5">
+              {pricePresets.map(preset => {
+                const isSelected = minPrice === preset.min && maxPrice === preset.max;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setMinPrice(preset.min);
+                      setMaxPrice(preset.max);
+                    }}
+                    className={`rounded-lg px-2 py-1 text-[10px] font-bold transition-colors ${
+                      isSelected
+                        ? "bg-[#009966] text-white"
+                        : "border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       {brands.length > 0 && (
@@ -514,6 +702,17 @@ export function ProductsPage({ onAdd, onWish, wish, onView }: {
           {activeFilterCount > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               {category !== "All" && <button type="button" onClick={() => setCategory("All")} className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{category}<X size={11} /></button>}
+              {subcategory !== "All" && <button type="button" onClick={() => setSubcategory("All")} className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{subcategory}<X size={11} /></button>}
+              {isPriceFiltered && (
+                <button
+                  type="button"
+                  onClick={resetPrice}
+                  className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                >
+                  Price: {formatPrice(minPrice)} – {formatPrice(maxPrice)}
+                  <X size={11} />
+                </button>
+              )}
               {brandFilters.map(brand => <button key={brand} type="button" onClick={() => toggleBrand(brand)} className="flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">{brand}<X size={11} /></button>)}
               {(inStockOnly || offersOnly || freeDeliveryOnly || codOnly) && <span className="rounded-full bg-muted px-3 py-1.5 text-[10px] font-bold text-muted-foreground">{[inStockOnly && "In stock", offersOnly && "On sale", freeDeliveryOnly && "Free delivery", codOnly && "COD"].filter(Boolean).join(" · ")}</span>}
               <button type="button" onClick={clearFilters} className="text-[10px] font-extrabold text-muted-foreground underline underline-offset-2 hover:text-foreground">Clear all</button>
